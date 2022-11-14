@@ -1,0 +1,14 @@
+{
+    "globals": {
+        "blocks_per_ckpt": 1,
+        "chunk_size": null,
+        "use_lma": false,
+        "offload_inference": false
+    },
+    "model": {
+        "template": {
+            "average_templates": false,
+            "offload_templates": false
+        }
+    }
+}

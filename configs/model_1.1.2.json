@@ -1,0 +1,17 @@
+{
+    "data": {
+        "train": {
+            "crop_size": 384
+        },
+        "common": {
+            "reduce_max_clusters_by_max_templates": true,
+            "use_template": true,
+            "use_template_torsion_angles": true
+        }
+    },
+    "model": {
+        "template": {
+            "enabled": true
+        }
+    }
+}

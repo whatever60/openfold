@@ -1,0 +1,14 @@
+{
+    "loss": {
+        "tm": {
+            "weight": 0.1
+        }
+    },
+    "model": {
+        "heads": {
+            "tm": {
+                "enabled": true
+            }
+        }
+    }
+}

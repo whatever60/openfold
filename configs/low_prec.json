@@ -1,0 +1,30 @@
+{
+    "globals": {
+        "eps": 0.0001
+    },
+    "model": {
+        "evoformer_stack": {
+            "inf": 10000.0
+        },
+        "extra_msa": {
+            "extra_msa_stack": {
+                "inf": 10000.0
+            }
+        },
+        "recycling_embedder": {
+            "inf": 10000.0
+        },
+        "structure_module": {
+            "inf": 10000.0
+        },
+        "template": {
+            "inf": 10000.0,
+            "template_pair_stack": {
+                "inf": 10000.0
+            },
+            "template_pointwise_attention": {
+                "inf": 10000.0
+            }
+        }
+    }
+}

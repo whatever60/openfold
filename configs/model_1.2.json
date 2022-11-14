@@ -1,0 +1,20 @@
+{
+    "data": {
+        "train": {
+            "max_msa_clusters": 512
+        }
+    },
+    "loss": {
+        "violation": {
+            "weight": 1.0
+        },
+        "experimentally_resolved": {
+            "weight": 0.01
+        }
+    },
+    "model": {
+        "template": {
+            "enabled": false
+        }
+    }
+}

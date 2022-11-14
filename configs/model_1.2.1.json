@@ -1,0 +1,16 @@
+{
+    "data": {
+        "train": {
+            "crop_size": 384,
+            "max_extra_msa": 5120
+        },
+        "predict": {
+            "max_extra_msa": 5120
+        }
+    },
+    "model": {
+        "template": {
+            "enabled": false
+        }
+    }
+}
