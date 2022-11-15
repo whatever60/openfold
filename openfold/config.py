@@ -67,11 +67,12 @@ def model_config(
         c.loss.violation.weight = 1.
         c.loss.experimentally_resolved.weight = 0.01
     elif name == "finetuning_ptm":
-        c.data.train.max_extra_msa = 5120
         c.data.train.crop_size = 384
+        c.data.train.max_extra_msa = 5120
         c.data.train.max_msa_clusters = 512
         c.loss.violation.weight = 1.
         c.loss.experimentally_resolved.weight = 0.01
+
         c.model.heads.tm.enabled = True
         c.loss.tm.weight = 0.1
     elif name == "finetuning_no_templ":
@@ -79,17 +80,19 @@ def model_config(
         c.data.train.crop_size = 384
         c.data.train.max_extra_msa = 5120
         c.data.train.max_msa_clusters = 512
-        c.model.template.enabled = False
         c.loss.violation.weight = 1.
         c.loss.experimentally_resolved.weight = 0.01
+
+        c.model.template.enabled = False
     elif name == "finetuning_no_templ_ptm":
         # AF2 Suppl. Table 4, "finetuning" setting
         c.data.train.crop_size = 384
         c.data.train.max_extra_msa = 5120
         c.data.train.max_msa_clusters = 512
-        c.model.template.enabled = False
         c.loss.violation.weight = 1.
         c.loss.experimentally_resolved.weight = 0.01
+
+        c.model.template.enabled = False
         c.model.heads.tm.enabled = True
         c.loss.tm.weight = 0.1
     # INFERENCE PRESETS
@@ -122,11 +125,12 @@ def model_config(
         c.model.template.enabled = False
     elif name == "model_1_ptm":
         c.data.train.max_extra_msa = 5120
-        c.data.predict.max_extra_msa = 5120 
+        c.data.predict.max_extra_msa = 5120
         c.data.common.reduce_max_clusters_by_max_templates = True
         c.data.common.use_templates = True
         c.data.common.use_template_torsion_angles = True
         c.model.template.enabled = True
+
         c.model.heads.tm.enabled = True
         c.loss.tm.weight = 0.1
     elif name == "model_2_ptm":
@@ -134,24 +138,42 @@ def model_config(
         c.data.common.use_templates = True
         c.data.common.use_template_torsion_angles = True
         c.model.template.enabled = True
+
         c.model.heads.tm.enabled = True
         c.loss.tm.weight = 0.1
     elif name == "model_3_ptm":
         c.data.train.max_extra_msa = 5120
         c.data.predict.max_extra_msa = 5120
         c.model.template.enabled = False
+
         c.model.heads.tm.enabled = True
         c.loss.tm.weight = 0.1
     elif name == "model_4_ptm":
         c.data.train.max_extra_msa = 5120
         c.data.predict.max_extra_msa = 5120
         c.model.template.enabled = False
+
         c.model.heads.tm.enabled = True
         c.loss.tm.weight = 0.1
     elif name == "model_5_ptm":
         c.model.template.enabled = False
+        
         c.model.heads.tm.enabled = True
         c.loss.tm.weight = 0.1
+    elif name == "no_msa_no_template":
+        c.model.extra_msa.enabled = False
+        c.model.template.enabled = False
+        # c.data.train.max_msa_clusters = 1
+        # c.data.common.no_msa = True
+        # c.data.common.no_templ = True
+        # c.data.common.msa_cluster_features = False
+        c.loss.masked_msa.weight = 0.0
+    elif name == "no_msa":
+        c.model.extra_msa.enabled = False
+        c.loss.masked_msa.weight = 0.0
+        # c.data.common.no_msa = True
+        # c.data.common.no_templ = False
+        # c.data.common.msa_cluster_features = False
     else:
         raise ValueError("Invalid model name")
 
@@ -300,6 +322,8 @@ config = mlc.ConfigDict(
                 ],
                 "use_templates": templates_enabled,
                 "use_template_torsion_angles": embed_template_torsion_angles,
+                "no_msa": False,
+                "no_templ": False
             },
             "supervised": {
                 "clamp_prob": 0.9,

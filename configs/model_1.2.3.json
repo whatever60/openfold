@@ -1,0 +1,12 @@
+{
+    "data": {
+        "train": {
+            "crop_size": 384
+        }
+    },
+    "model": {
+        "template": {
+            "enabled": false
+        }
+    }
+}

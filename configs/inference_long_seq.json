@@ -1,0 +1,23 @@
+{
+    "globals": {
+        "offload_inference": true,
+        "use_lma": true,
+        "use_flash": false
+    },
+    "model": {
+        "template": {
+            "offload_inference": true,
+            "template_pair_stack": {
+                "tune_chunk_size": false
+            }
+        },
+        "extra_msa": {
+            "extra_msa_stack": {
+                "tune_chunk_size": false
+            }
+        },
+        "evoformer_stack": {
+            "tune_chunk_size": false
+        }
+    }
+}
