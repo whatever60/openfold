@@ -242,7 +242,6 @@ class MSAAttention(nn.Module):
                 cost of slower execution. Chunking is not performed by default.
                 
         """
-        attn = None
         if(_chunk_logits is not None):
             return self._chunked_msa_attn(
                 m=m, z=z, mask=mask, 
@@ -275,7 +274,7 @@ class MSAAttention(nn.Module):
             )
         else:
             m = self.layer_norm_m(m)
-            m, attn = self.mha(
+            m = self.mha(
                 q_x=m, 
                 kv_x=m, 
                 biases=biases,
@@ -285,7 +284,7 @@ class MSAAttention(nn.Module):
                 flash_mask=mask,
             )
 
-        return m, attn
+        return m
 
 
 class MSARowAttentionWithPairBias(MSAAttention):
@@ -371,13 +370,12 @@ class MSAColumnAttention(nn.Module):
                 batch dimensions. A low value decreases memory overhead at the 
                 cost of slower execution. Chunking is not performed by default.
         """ 
-        attn = None
         # [*, N_res, N_seq, C_in]
         m = m.transpose(-2, -3)
         if mask is not None:
             mask = mask.transpose(-1, -2)
 
-        m, attn = self._msa_att(
+        m = self._msa_att(
             m, 
             mask=mask, 
             chunk_size=chunk_size, 
@@ -390,7 +388,7 @@ class MSAColumnAttention(nn.Module):
         if mask is not None:
             mask = mask.transpose(-1, -2)
 
-        return m, attn
+        return m
 
 
 class MSAColumnGlobalAttention(nn.Module):
@@ -445,7 +443,6 @@ class MSAColumnGlobalAttention(nn.Module):
         chunk_size: Optional[int] = None,
         use_lma: bool = False,
     ) -> torch.Tensor:
-        attn = None
         n_seq, n_res, c_in = m.shape[-3:]
 
         if mask is None:
@@ -467,9 +464,9 @@ class MSAColumnGlobalAttention(nn.Module):
             m = self._chunk(m, mask, chunk_size, use_lma=use_lma) 
         else:
             m = self.layer_norm_m(m)
-            m, attn = self.global_attention(m=m, mask=mask, use_lma=use_lma)
+            m = self.global_attention(m=m, mask=mask, use_lma=use_lma)
 
         # [*, N_seq, N_res, C_in]
         m = m.transpose(-2, -3)
 
-        return m, attn
+        return m
