@@ -31,11 +31,11 @@ def enforce_config_constraints(config):
             raise ValueError(f"Only one of {s1} and {s2} may be set at a time")
 
     fa_is_installed = importlib.util.find_spec("flash_attn") is not None
-    if(config.globals.use_flash and not fa_is_installed):
+    if(config["globals"]["use_flash"] and not fa_is_installed):
         raise ValueError("use_flash requires that FlashAttention is installed")
 
     if(
-        config.globals.offload_inference and 
-        not config.model.template.average_templates
+        config["globals"]["offload_inference"] and 
+        not config["model"]["template"]["average_templates"]
     ):
-        config.model.template.offload_templates = True
+        config["model"]["template"]["offload_templates"] = True

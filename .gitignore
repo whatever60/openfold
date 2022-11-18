@@ -1,4 +1,5 @@
 *.pt
+*.npz
 .vscode/
 *.jpg
 *.png

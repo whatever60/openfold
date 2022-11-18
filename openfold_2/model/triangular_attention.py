@@ -100,6 +100,7 @@ class TriangleAttention(nn.Module):
         Returns:
             [*, I, J, C_in] output tensor
         """ 
+        attn = None
         if mask is None:
             # [*, I, J]
             mask = x.new_ones(
@@ -134,7 +135,7 @@ class TriangleAttention(nn.Module):
                 inplace_safe=inplace_safe,
             )
         else:
-            x = self.mha(
+            x, attn = self.mha(
                 q_x=x, 
                 kv_x=x, 
                 biases=biases, 
@@ -145,7 +146,7 @@ class TriangleAttention(nn.Module):
         if(not self.starting):
             x = x.transpose(-2, -3)
 
-        return x
+        return x, attn
 
 
 # Implements Algorithm 13

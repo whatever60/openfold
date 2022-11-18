@@ -250,12 +250,11 @@ def _attention(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, bias
         a += b
 
     a = softmax_no_cast(a, -1)
-    attn = a.detach()
 
     # [*, H, Q, C_hidden]
     a = torch.matmul(a, value)
 
-    return a, attn
+    return a
 
 
 @torch.jit.ignore
@@ -455,7 +454,6 @@ class Attention(nn.Module):
         Returns
             [*, Q, C_q] attention update
         """
-        attn = None
         if(use_lma and (lma_q_chunk_size is None or lma_kv_chunk_size is None)):
             raise ValueError(
                 "If use_lma is specified, lma_q_chunk_size and "
@@ -502,12 +500,12 @@ class Attention(nn.Module):
         elif(use_flash):
             o = _flash_attn(q, k, v, flash_mask)
         else:
-            o, attn = _attention(q, k, v, biases)
+            o = _attention(q, k, v, biases)
             o = o.transpose(-2, -3)
 
         o = self._wrap_up(o, q_x)
 
-        return o, attn
+        return o
 
 
 class GlobalAttention(nn.Module):
@@ -540,7 +538,6 @@ class GlobalAttention(nn.Module):
         mask: torch.Tensor,
         use_lma: bool = False,
     ) -> torch.Tensor:
-        attn = None
         # [*, N_res, C_in]
         q = torch.sum(m * mask.unsqueeze(-1), dim=-2) / (
             torch.sum(mask, dim=-1)[..., None] + self.eps
@@ -572,7 +569,6 @@ class GlobalAttention(nn.Module):
                 a,
                 v,
             )
-            attn = a.detach()
         else:
             o = _lma(
                 q, 
@@ -598,7 +594,7 @@ class GlobalAttention(nn.Module):
         # [*, N_res, N_seq, C_in]
         m = self.linear_o(o)
 
-        return m, attn
+        return m
 
 
 def _lma(
