@@ -1,0 +1,83 @@
+# what do we need as input
+# - Raw sequences of MSA
+# - template sequences
+# - template Cβ distogram
+# - template Cα coordinate
+# - template torsion angle
+# - All kinds of masks
+
+# what do we need as output
+# - True sequences of masked MSA
+# - All atom positions
+# - Distogram
+# - Resolved
+# - Torsion angles
+# - Reference frames
+
+= aatype 				 torch.Size([1, 209, 4])  # [batch_size, num_residues, num_recycles]
+= residue_index 				 torch.Size([1, 209, 4])
+= seq_length 				 torch.Size([1, 4])
+= all_atom_positions 				 torch.Size([1, 209, 37, 3, 4])
+= all_atom_mask 				 torch.Size([1, 209, 37, 4])
+= resolution 				 torch.Size([1, 4])
+= is_distillation 				 torch.Size([1, 4])
+
+= seq_mask 				 torch.Size([1, 209, 4])
+= msa_mask 				 torch.Size([1, 128, 209, 4])  # [batch_size, num_msas, num_residuals, num_recycles]
+= bert_mask 				 torch.Size([1, 128, 209, 4])  # what's the difference between bert_mask and msa_mask
+= msa_row_mask 				 torch.Size([1, 128, 4])
+= true_msa 				 torch.Size([1, 128, 209, 4])
+
+# template
+template_aatype 				 torch.Size([1, 4, 209, 4])  # [batch_size, num_templates, num_residues, num_recycles]
+template_all_atom_mask 				 torch.Size([1, 4, 209, 37, 4])
+template_all_atom_positions 				 torch.Size([1, 4, 209, 37, 3, 4])  # [batch_size, num_templates, num_residuals, 37, xyz, num_recycles]
+template_sum_probs 				 torch.Size([1, 4, 1, 4])
+template_mask 				 torch.Size([1, 4, 4])
+template_pseudo_beta 				 torch.Size([1, 4, 209, 3, 4])
+template_pseudo_beta_mask 				 torch.Size([1, 4, 209, 4])
+template_torsion_angles_sin_cos 				 torch.Size([1, 4, 209, 7, 2, 4])
+template_alt_torsion_angles_sin_cos 				 torch.Size([1, 4, 209, 7, 2, 4])
+template_torsion_angles_mask 				 torch.Size([1, 4, 209, 7, 4])
+
+residx_atom14_to_atom37 				 torch.Size([1, 209, 14, 4])  # what is 37 and what is 14?
+residx_atom37_to_atom14 				 torch.Size([1, 209, 37, 4])
+atom14_atom_exists 				 torch.Size([1, 209, 14, 4])
+atom37_atom_exists 				 torch.Size([1, 209, 37, 4])
+
+atom14_gt_positions 				 torch.Size([1, 209, 14, 3, 4])
+atom14_alt_gt_positions 				 torch.Size([1, 209, 14, 3, 4])
+atom14_gt_exists 				 torch.Size([1, 209, 14, 4])
+atom14_alt_gt_exists 				 torch.Size([1, 209, 14, 4])
+atom14_atom_is_ambiguous 				 torch.Size([1, 209, 14, 4])
+
+rigidgroups_gt_frames 				 torch.Size([1, 209, 8, 4, 4, 4])  # why 4x4?
+rigidgroups_alt_gt_frames 				 torch.Size([1, 209, 8, 4, 4, 4])
+rigidgroups_gt_exists 				 torch.Size([1, 209, 8, 4])  # for experimentally_resolved loss
+rigidgroups_group_exists 				 torch.Size([1, 209, 8, 4])  # indicate whether a torsion angle applied to this amino acid
+rigidgroups_group_is_ambiguous 				 torch.Size([1, 209, 8, 4])  # indicate whether alt is needed.
+
+pseudo_beta 				 torch.Size([1, 209, 3, 4])
+pseudo_beta_mask 				 torch.Size([1, 209, 4])
+backbone_rigid_tensor 				 torch.Size([1, 209, 4, 4, 4])
+backbone_rigid_mask 				 torch.Size([1, 209, 4])
+chi_angles_sin_cos 				 torch.Size([1, 209, 4, 2, 4])  # why 4?
+chi_mask 				 torch.Size([1, 209, 4, 4])
+
+
+# extra msa
+extra_msa 				 torch.Size([1, 1024, 209, 4])
+extra_has_deletion 				 torch.Size([1, 1024, 209, 4])
+extra_deletion_value 				 torch.Size([1, 1024, 209, 4])
+extra_msa_mask 				 torch.Size([1, 1024, 209, 4])  # this is actually padding mask
+extra_msa_row_mask 				 torch.Size([1, 1024, 4])
+
+# msa feat
+msa_feat 				 torch.Size([1, 128, 209, 49, 4])  # [batch_size, num_msas, num_residuals, 23 + 1 + 1 + 1 + 23]
+
+# target feat
+target_feat 				 torch.Size([1, 209, 22, 4])  # [batch_size, num_residuals, num_tokens (aatype + gap + unknown)]  why 22 instead of 21?
+
+batch_idx 				 torch.Size([1, 4])
+use_clamped_fape 				 torch.Size([1, 4])  # bool
+no_recycling_iters 				 torch.Size([1, 4])  # [3, 3, 3, 3] for validation

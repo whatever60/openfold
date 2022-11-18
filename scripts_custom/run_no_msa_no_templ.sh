@@ -38,7 +38,7 @@ python train_openfold.py \
      --config_preset no_msa_no_template \
      --gpus $1 \
      --num_nodes $2 \
-     --resume_from_ckpt train_baseline/test/single_sequence_yiming/b7i6lrtn/checkpoints/16-59499.ckpt/
+     --resume_from_ckpt train_baseline/test/single_sequence_yiming/1rur4vrq/checkpoints/19-69999.ckpt/
      # --rich
      # --resume_from_ckpt train_gustaf_output/baseline/openfold-ls6/v8be17mz/checkpoints/4-4999.ckpt/
 
