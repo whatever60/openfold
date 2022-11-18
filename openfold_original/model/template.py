@@ -110,7 +110,6 @@ class TemplatePointwiseAttention(nn.Module):
         chunk_size: Optional[int] = 256,
         use_lma: bool = False,
     ) -> torch.Tensor:
-        attn = None
         """
         Args:
             t:
@@ -138,12 +137,12 @@ class TemplatePointwiseAttention(nn.Module):
         if chunk_size is not None and not self.training:
             z = self._chunk(z, t, biases, chunk_size, use_lma=use_lma)
         else:
-            z, attn = self.mha(q_x=z, kv_x=t, biases=biases, use_lma=use_lma)
+            z = self.mha(q_x=z, kv_x=t, biases=biases, use_lma=use_lma)
 
         # [*, N_res, N_res, C_z]
         z = z.squeeze(-2)
 
-        return z, attn
+        return z
 
 
 class TemplatePairStackBlock(nn.Module):
@@ -207,7 +206,6 @@ class TemplatePairStackBlock(nn.Module):
         _mask_trans: bool = True,
         _attn_chunk_size: Optional[int] = None,
     ):
-        attn_tri_s, attn_tri_e = None, None, None, None
         if(_attn_chunk_size is None):
             _attn_chunk_size = chunk_size
 
@@ -222,47 +220,31 @@ class TemplatePairStackBlock(nn.Module):
             single = single_templates[i]
             single_mask = single_templates_masks[i]
             
-            # single = add(single,
-            #     self.dropout_row(
-            #         self.tri_att_start(
-            #             single,
-            #             chunk_size=_attn_chunk_size,
-            #             mask=single_mask,
-            #             use_lma=use_lma,
-            #             inplace_safe=inplace_safe,
-            #         )
-            #     ),
-            #     inplace_safe,
-            # )
-            single_update, attn_tri_s = self.tri_attn_start(
-                single,
-                chunk_size=_attn_chunk_size,
-                mask=single_mask,
-                use_lma=use_lma,
-                inplace_safe=inplace_safe,
+            single = add(single,
+                self.dropout_row(
+                    self.tri_att_start(
+                        single,
+                        chunk_size=_attn_chunk_size,
+                        mask=single_mask,
+                        use_lma=use_lma,
+                        inplace_safe=inplace_safe,
+                    )
+                ),
+                inplace_safe,
             )
-            single = add(single, self.dropout_row(single_update), inplace_safe)
 
-            # single = add(single,
-            #     self.dropout_col(
-            #         self.tri_att_end(
-            #             single,
-            #             chunk_size=_attn_chunk_size,
-            #             mask=single_mask,
-            #             use_lma=use_lma,
-            #             inplace_safe=inplace_safe,
-            #         )
-            #     ),
-            #     inplace_safe,
-            # )
-            single_update, attn_tri_e = self.tri_attn_end(
-                single,
-                chunk_size=_attn_chunk_size,
-                mask=single_mask,
-                use_lma=use_lma,
-                inplace_safe=inplace_safe,
+            single = add(single,
+                self.dropout_col(
+                    self.tri_att_end(
+                        single,
+                        chunk_size=_attn_chunk_size,
+                        mask=single_mask,
+                        use_lma=use_lma,
+                        inplace_safe=inplace_safe,
+                    )
+                ),
+                inplace_safe,
             )
-            single = add(single, self.dropout_col(single_update), inplace_safe)
 
             tmu_update = self.tri_mul_out(
                 single,
@@ -305,7 +287,7 @@ class TemplatePairStackBlock(nn.Module):
         if(not inplace_safe):
             z = torch.cat(single_templates, dim=-4)
 
-        return z, attn_tri_s, attn_tri_e
+        return z
 
 
 class TemplatePairStack(nn.Module):
