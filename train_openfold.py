@@ -364,6 +364,14 @@ def bool_type(bool_str: str):
         raise ValueError(f"Cannot interpret {bool_str} as bool")
 
 
+def enforce_arg_constrains(args):
+    if args["seed"] is None and (
+        (args["gpus"] is not None and args["gpus"] > 1)
+        or (args["num_nodes"] is not None and args["num_nodes"] > 1)
+    ):
+        raise ValueError("For distributed training, --seed must be specified")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(

@@ -47,6 +47,10 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
         _structure_index: Optional[Any] = None,
     ):
         """
+        The most basic dataset. It is responsible for parsing structure, MSA and template data.
+        There is no stochasticity in this dataset. It faithfully loops over the directory 
+        and parse everything (with specified postfix).
+
         Args:
             data_dir:
                 A path to a directory containing mmCIF files (in train
@@ -310,7 +314,7 @@ def deterministic_train_filter(
 
 def get_stochastic_train_filter_prob(
     chain_data_cache_entry: Any,
-) -> List[float]:
+) -> float:
     # Stochastic filters
     probabilities = []
 
@@ -335,6 +339,20 @@ class OpenFoldDataset(torch.utils.data.Dataset):
     Because samples are selected from constituent datasets randomly, the
     length of an OpenFoldFilteredDataset is arbitrary. Samples are selected
     and filtered once at initialization.
+
+    There are two deterministic filters and two stochastic filters.
+    - Deterministic filters:
+    -- Resolution > 9.0
+    -- Largest single AA proportion > 0.8
+    - Stochastic filters:
+    -- Sequence diversity: 1 / cluster size
+    -- Chain length: max(1 / min(chain_length, 512), 256) / 512
+
+    For each child dataset, we do sampling without replacement in a accept/reject manner.
+    We will loop through the child datasets and sample until we have enough (epoch length).
+
+    Note:
+    Current implementation can be drastically simplified by doing sampling in a vectorized manner.
     """
 
     def __init__(
@@ -342,7 +360,7 @@ class OpenFoldDataset(torch.utils.data.Dataset):
         datasets: Sequence[OpenFoldSingleDataset],
         probabilities: Sequence[int],
         epoch_len: int,
-        generator: torch.Generator = None,
+        generator: torch.Generator = None,  # Why do we need this?
         _roll_at_init: bool = True,
     ):
         self.datasets = datasets
@@ -369,6 +387,9 @@ class OpenFoldDataset(torch.utils.data.Dataset):
             idx_iter = looped_shuffled_dataset_idx(len(dataset))
             chain_data_cache = dataset.chain_data_cache
             while True:
+                # ideally, each chain has a fixed probability, and a numpy.random.choice would solve the problem, but we need to 
+                # stick to pytorch random generator. However, pytorch doesn't have random 
+                # choice function. Therefore, we use multinomial.
                 weights = []
                 idx = []
                 for _ in range(max_cache_len):
@@ -396,6 +417,7 @@ class OpenFoldDataset(torch.utils.data.Dataset):
                 for datapoint_idx in cache:
                     yield datapoint_idx
 
+        # perform sampling for each dataset
         self._samples = [looped_samples(i) for i in range(len(self.datasets))]
 
         if _roll_at_init:
@@ -409,6 +431,7 @@ class OpenFoldDataset(torch.utils.data.Dataset):
         return self.epoch_len
 
     def reroll(self):
+        # sample across datasets
         dataset_choices = torch.multinomial(
             torch.tensor(self.probabilities),
             num_samples=self.epoch_len,
@@ -430,6 +453,12 @@ class OpenFoldBatchCollator:
 
 
 class OpenFoldDataLoader(torch.utils.data.DataLoader):
+    """
+    This DataLoader takes care of configuring recycling and clamping FAPE loss.
+    It samples from the dataset multiple times, i.e., recycling.
+    It adds batch-level features to the input.
+    It doesn't need to shuffle. The dataset already takes care of shuffling.
+    """
     def __init__(self, *args, config, stage="train", generator=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.config = config
@@ -442,6 +471,11 @@ class OpenFoldDataLoader(torch.utils.data.DataLoader):
         self._prep_batch_properties_probs()
 
     def _prep_batch_properties_probs(self):
+        """
+        `use_clamped_fape` and `no_recycling_iters` are the only "batch-level" properties.
+        `self.prop_probs_tensor` is just there to parallelize the multinomial. I think it
+        is not necessary.
+        """
         keyed_probs = []
         stage_cfg = self.config[self.stage]
 
@@ -467,6 +501,7 @@ class OpenFoldDataLoader(torch.utils.data.DataLoader):
             [p + pad for p, pad in zip(probs, padding)],
             dtype=torch.float32,
         )
+        print(self.prop_keys, self.prop_probs_tensor, keyed_probs)
 
     def _add_batch_properties(self, batch):
         samples = torch.multinomial(
@@ -513,6 +548,9 @@ class OpenFoldDataLoader(torch.utils.data.DataLoader):
 
 
 class OpenFoldDataModule(pl.LightningDataModule):
+    """
+    There are two random generators, one for DataLoader and one for Dataset.
+    """
     def __init__(
         self,
         config: mlc.ConfigDict,
@@ -538,7 +576,7 @@ class OpenFoldDataModule(pl.LightningDataModule):
         _distillation_structure_index_path: Optional[str] = None,
         alignment_index_path: Optional[str] = None,
         distillation_alignment_index_path: Optional[str] = None,
-        **kwargs,
+        # **kwargs,
     ):
         super(OpenFoldDataModule, self).__init__()
 

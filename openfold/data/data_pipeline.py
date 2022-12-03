@@ -590,26 +590,11 @@ class DataPipeline:
         self,
         alignment_dir: str,
         input_sequence: Optional[str] = None,
-        alignment_index: Optional[str] = None,
+        alignment_index: Optional[str] = None
     ) -> Mapping[str, Any]:
-        # if no_msa is False:
         msas, deletion_matrices = self._get_msas(
             alignment_dir, input_sequence, alignment_index
         )
-        # elif no_msa is True:
-        #     msas, deletion_matrices = zip(
-        #         *[
-        #             (v["msa"], v["deletion_matrix"])
-        #             for v in {
-        #                 "dummy": {
-        #                     "msa": [input_sequence],
-        #                     "deletion_matrix": [[0 for _ in input_sequence]],
-        #                 }
-        #             }.values()
-        #         ]
-        #     )
-        # else:
-        #     raise ValueError("`no_msa` should be boolean.")
         msa_features = make_msa_features(
             msas=msas,
             deletion_matrices=deletion_matrices,
