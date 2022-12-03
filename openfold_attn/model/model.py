@@ -1262,7 +1262,7 @@ class AlphaFold(nn.Module):
                     else:
                         a = a + pt_att
                         a = a + square_mask.unsqueeze(-3)
-                        a = iap.softmax(a)
+                        a = ipa.softmax(a)
                     attns[f"{cycle_no}-ipa-attn-{i}"] = a.detach()
 
                     ################
