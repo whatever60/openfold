@@ -5,7 +5,7 @@
 *.png
 slurm_log/
 tests/test_data/
-*.ipynb
+# *.ipynb
 train_baseline/
 flash-attention/
 *.npz
