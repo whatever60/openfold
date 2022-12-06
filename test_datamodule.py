@@ -8,11 +8,7 @@ import json
 
 import numpy as np
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks.lr_monitor import LearningRateMonitor
-from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.plugins.training_type import DeepSpeedPlugin, DDPPlugin
-from pytorch_lightning.plugins.environments import SLURMEnvironment
+from pytorch_lightning import seed_everything
 import torch
 from flatten_dict import flatten, unflatten
 import yaml
@@ -25,33 +21,7 @@ from openfold.data.data_modules import (
     DummyDataLoader,
 )
 from openfold.model.model import AlphaFold
-from openfold.model.torchscript import script_preset_
-from openfold.np import residue_constants
-from openfold.utils.argparse import remove_arguments
-from openfold.utils.callbacks import (
-    EarlyStoppingVerbose,
-)
-from openfold.utils.exponential_moving_average import ExponentialMovingAverage
-from openfold.utils.loss import AlphaFoldLoss, lddt_ca
-from openfold.utils.lr_schedulers import AlphaFoldLRScheduler
-from openfold.utils.seed import seed_everything
-from openfold.utils.superimposition import superimpose
-from openfold.utils.tensor_utils import tensor_tree_map
-from openfold.utils.validation_metrics import (
-    drmsd,
-    gdt_ts,
-    gdt_ha,
-)
-from openfold.utils.import_weights import import_jax_weights_
-
-from scripts.zero_to_fp32 import (
-    get_fp32_state_dict_from_zero_checkpoint,
-    get_global_step_from_zero_checkpoint,
-)
-
-from openfold.utils.logger import PerformanceLoggingCallback
 from openfold.utils.config_check import enforce_config_constraints
-
 from train_openfold import OpenFoldWrapper, enforce_arg_constrains
 
 
@@ -72,15 +42,11 @@ args = dict(
     # validation
     val_data_dir="/scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/val_set/data",
     val_alignment_dir="/scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/val_set/alignments",
-    # model
-    # {initial_training/fintuning/fintuning_no_template/model_1.1/model_1.2/model_1.1.1/model_1.1.2/model_1.2.1/model_1.2.2/model_1.2.3}
-    config_stage="initial_training",
-    # {ptm/None}
-    config_ptm=False,
-    # {train/inference_long_seq/None}
-    config_mode="train",
-    # {low_prec/None}
-    config_lowprec=False,
+    # config
+    config_stage="initial_training",  # {initial_training/fintuning/fintuning_no_template/model_1.1/model_1.2/model_1.1.1/model_1.1.2/model_1.2.1/model_1.2.2/model_1.2.3}
+    config_ptm=False,  # {ptm/None}
+    config_mode="train",  # {train/inference_long_seq/None}
+    config_lowprec=False,  # {low_prec/None}
     script_modules=False,
     # ditillation
     distillation_data_dir=None,
@@ -121,66 +87,69 @@ args = dict(
 
 enforce_arg_constrains(args)
 
-# load config
-config = {}
-
 
 def update_config(old: dict, new: dict) -> dict:
-    return unflatten({**flatten(config), **flatten(new)})
+    return unflatten({**flatten(old), **flatten(new)})
 
 
-with open(f"configs/{args['config_stage']}.json") as f:
-    config = update_config(config, json.load(f))
-if args["config_ptm"]:
-    with open(f"configs/ptm.json") as f:
+if __name__ == "__main__":
+    # load config
+    with open(f"configs/base.json") as f:
+        config = json.load(f)
+    with open(f"configs/{args['config_stage']}.json") as f:
         config = update_config(config, json.load(f))
-with open(f"configs/{args['config_mode']}.json") as f:
-    config = update_config(config, json.load(f))
-if args["config_lowprec"]:
-    with open(f"configs/low_prec.json") as f:
+    if args["config_ptm"]:
+        with open(f"configs/ptm.json") as f:
+            config = update_config(config, json.load(f))
+    with open(f"configs/{args['config_mode']}.json") as f:
         config = update_config(config, json.load(f))
+    if args["config_lowprec"]:
+        with open(f"configs/low_prec.json") as f:
+            config = update_config(config, json.load(f))
 
-enforce_config_constraints(config)
+    enforce_config_constraints(config)
 
-if args["seed"] is not None:
-    seed_everything(args["seed"])
+    if args["seed"] is not None:
+        seed_everything(args["seed"])
 
-# for the sake of testing
-config["data"]["data_module"]["data_loaders"] = {
-    "batch_size": 1,
-    "num_workers": 8,
-    "pin_memory": True,
-}
-config["globals"]["chunk_size"] = None
+    # for the sake of testing
+    config["data"]["data_module"]["data_loaders"] = {
+        "batch_size": 1,
+        "num_workers": 8,
+        "pin_memory": True,
+    }
+    config["globals"]["chunk_size"] = None
 
 
-# training mode (train_data_dir passed)
-data_module = OpenFoldDataModule(
-    config=mlc.ConfigDict(config["data"]),
-    template_mmcif_dir=args["template_mmcif_dir"],
-    max_template_date=args["max_template_date"],
-    train_data_dir=args["train_data_dir"],
-    train_alignment_dir=args["train_alignment_dir"],
-    train_chain_data_cache_path=args["train_chain_data_cache_path"],
-    distillation_data_dir=args["distillation_data_dir"],
-    distillation_alignment_dir=args["distillation_alignment_dir"],
-    distillation_chain_data_cache_path=args["distillation_chain_data_cache_path"],
-    val_data_dir=args["val_data_dir"],
-    val_alignment_dir=args["val_alignment_dir"],
-    kalign_binary_path=args["kalign_binary_path"],
-    train_filter_path=args["train_filter_path"],
-    distillation_filter_path=args["distillation_filter_path"],
-    obsolete_pdbs_file_path=args["obsolete_pdbs_file_path"],
-    template_release_dates_cache_path=args["template_release_dates_cache_path"],
-    batch_seed=args["seed"],
-    train_epoch_len=args["train_epoch_len"],
-    _distillation_structure_index_path=args["_distillation_structure_index_path"],
-    alignment_index_path=args["alignment_index_path"],
-    distillation_alignment_index_path=args["distillation_alignment_index_path"],
-    predict_data_dir=None,
-    predict_alignment_dir=None,
-    # **vars(args)
-)
+    # training mode (train_data_dir passed)
+    data_module = OpenFoldDataModule(
+        config=mlc.ConfigDict(config["data"]),
+        template_mmcif_dir=args["template_mmcif_dir"],
+        max_template_date=args["max_template_date"],
+        train_data_dir=args["train_data_dir"],
+        train_alignment_dir=args["train_alignment_dir"],
+        train_chain_data_cache_path=args["train_chain_data_cache_path"],
+        distillation_data_dir=args["distillation_data_dir"],
+        distillation_alignment_dir=args["distillation_alignment_dir"],
+        distillation_chain_data_cache_path=args["distillation_chain_data_cache_path"],
+        val_data_dir=args["val_data_dir"],
+        val_alignment_dir=args["val_alignment_dir"],
+        kalign_binary_path=args["kalign_binary_path"],
+        train_filter_path=args["train_filter_path"],
+        distillation_filter_path=args["distillation_filter_path"],
+        obsolete_pdbs_file_path=args["obsolete_pdbs_file_path"],
+        template_release_dates_cache_path=args["template_release_dates_cache_path"],
+        batch_seed=args["seed"],
+        train_epoch_len=args["train_epoch_len"],
+        _distillation_structure_index_path=args["_distillation_structure_index_path"],
+        alignment_index_path=args["alignment_index_path"],
+        distillation_alignment_index_path=args["distillation_alignment_index_path"],
+        predict_data_dir=None,
+        predict_alignment_dir=None,
+        # **vars(args)
+    )
 
-data_module.prepare_data()
-data_module.setup()
+    data_module.prepare_data()
+    data_module.setup()
+    dataloader = data_module.train_dataloader()
+    sample = next(iter(dataloader))
