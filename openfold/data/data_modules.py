@@ -48,8 +48,8 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
     ):
         """
         The most basic dataset. It is responsible for parsing structure, MSA and template data.
-        There is no stochasticity in this dataset. It faithfully loops over the directory 
-        and parse everything (with specified postfix).
+        It faithfully loops over the directory and parse everything with specified postfix.
+        It takes care of MSA block deletion and cropping, which is sample-level.
 
         Args:
             data_dir:
@@ -350,9 +350,8 @@ class OpenFoldDataset(torch.utils.data.Dataset):
 
     For each child dataset, we do sampling without replacement in a accept/reject manner.
     We will loop through the child datasets and sample until we have enough (epoch length).
-
-    Note:
-    Current implementation can be drastically simplified by doing sampling in a vectorized manner.
+    All stochastic shuffling and sampling is managed by this dataset. Therefore, we need
+    the same generator across workers for parallelism.
     """
 
     def __init__(
@@ -458,6 +457,8 @@ class OpenFoldDataLoader(torch.utils.data.DataLoader):
     It samples from the dataset multiple times, i.e., recycling.
     It adds batch-level features to the input.
     It doesn't need to shuffle. The dataset already takes care of shuffling.
+    Both recycling and clamping FAPE are batch-level property, i.e., they need to have the
+    same value across GPUs. Thus the same generator is copied to all processes.
     """
     def __init__(self, *args, config, stage="train", generator=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -501,7 +502,6 @@ class OpenFoldDataLoader(torch.utils.data.DataLoader):
             [p + pad for p, pad in zip(probs, padding)],
             dtype=torch.float32,
         )
-        print(self.prop_keys, self.prop_probs_tensor, keyed_probs)
 
     def _add_batch_properties(self, batch):
         samples = torch.multinomial(
@@ -509,9 +509,9 @@ class OpenFoldDataLoader(torch.utils.data.DataLoader):
             num_samples=1,  # 1 per row
             replacement=True,
             generator=self.generator,
-        )
+        )  # the first element: whether to clamp FAPE loss, the second: number of iterations
 
-        aatype = batch["aatype"]
+        aatype = batch["aatype"]  # [batch_size, num_residues, max_recycles]
         batch_dims = aatype.shape[:-2]
         recycling_dim = aatype.shape[-1]
         no_recycling = recycling_dim
@@ -520,10 +520,12 @@ class OpenFoldDataLoader(torch.utils.data.DataLoader):
             sample_tensor = torch.tensor(
                 sample, device=aatype.device, requires_grad=False
             )
-            orig_shape = sample_tensor.shape
+            orig_shape = sample_tensor.shape  # scaler
+            # [batch_size, 1]
             sample_tensor = sample_tensor.view(
                 (1,) * len(batch_dims) + sample_tensor.shape + (1,)
             )
+            # [batch_size, max_recycles]
             sample_tensor = sample_tensor.expand(
                 batch_dims + orig_shape + (recycling_dim,)
             )
@@ -576,7 +578,7 @@ class OpenFoldDataModule(pl.LightningDataModule):
         _distillation_structure_index_path: Optional[str] = None,
         alignment_index_path: Optional[str] = None,
         distillation_alignment_index_path: Optional[str] = None,
-        # **kwargs,
+        **kwargs,
     ):
         super(OpenFoldDataModule, self).__init__()
 
