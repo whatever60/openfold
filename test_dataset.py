@@ -20,7 +20,8 @@ obsolete_pdbs_file_path = (
 )
 
 
-train_data_dir = "/scratch/00946/zzhang/data/openfold/ls6-tacc/pdb_mmcif/mmcif_files"
+# train_data_dir = "/scratch/00946/zzhang/data/openfold/ls6-tacc/pdb_mmcif/mmcif_files"
+train_data_dir = "/work/09101/whatever/data/example/alphafold"
 train_alignment_dir = "/scratch/00946/zzhang/data/openfold/ls6-tacc/alignment_db"
 train_chain_data_cache_path = (
     "/scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/prot_data_cache.json"
