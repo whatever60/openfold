@@ -318,7 +318,7 @@ def get_stochastic_train_filter_prob(
     # Stochastic filters
     probabilities = []
 
-    cluster_size = chain_data_cache_entry.get("cluster_size", None)
+    cluster_si  ze = chain_data_cache_entry.get("cluster_size", None)
     if cluster_size is not None and cluster_size > 0:
         probabilities.append(1 / cluster_size)
 
@@ -384,7 +384,7 @@ class OpenFoldDataset(torch.utils.data.Dataset):
             max_cache_len = int(epoch_len * probabilities[dataset_idx])
             dataset = self.datasets[dataset_idx]
             idx_iter = looped_shuffled_dataset_idx(len(dataset))
-            chain_data_cache = dataset.chain_data_cache
+            chain_data_cache: dict = dataset.chain_data_cache
             while True:
                 # ideally, each chain has a fixed probability, and a numpy.random.choice would solve the problem, but we need to 
                 # stick to pytorch random generator. However, pytorch doesn't have random 

@@ -12,14 +12,8 @@ import pytorch_lightning as pl
 import torch
 from torch.utils.data import RandomSampler
 
-from openfold.data import (
-    data_pipeline,
-    feature_pipeline,
-    mmcif_parsing,
-    templates,
-)
 from openfold.utils.tensor_utils import tensor_tree_map, dict_multimap
-from openfold.data import templates, parsers, mmcif_parsing
+from openfold.data import templates, parsers, mmcif_parsing, feature_pipeline
 from openfold.np import residue_constants, protein
 from openfold.data.tools.utils import to_date
 
@@ -27,43 +21,7 @@ from openfold.data.tools.utils import to_date
 FeatureDict = Mapping[str, np.ndarray]
 
 
-def make_template_features(
-    input_sequence: str,
-    hits: Sequence[Any],
-    template_featurizer: Any,
-    query_pdb_code: Optional[str] = None,
-    query_release_date: Optional[str] = None,
-) -> FeatureDict:
-    hits_cat = sum(hits.values(), [])
-    if len(hits_cat) == 0 or template_featurizer is None:
-        template_features = empty_template_feats(len(input_sequence))
-    else:
-        templates_result = template_featurizer.get_templates(
-            query_sequence=input_sequence,
-            query_pdb_code=query_pdb_code,
-            query_release_date=query_release_date,
-            hits=hits_cat,
-        )
-        template_features = templates_result.features
-
-        # The template featurizer doesn't format empty template features
-        # properly. This is a quick fix.
-        if template_features["template_aatype"].shape[0] == 0:
-            template_features = empty_template_feats(len(input_sequence))
-
-    return template_features
-
-
-def empty_template_feats(n_res) -> FeatureDict:
-    return {
-        "template_aatype": np.zeros((0, n_res)).astype(np.int64),
-        "template_all_atom_positions": np.zeros((0, n_res, 37, 3)).astype(np.float32),
-        "template_sum_probs": np.zeros((0, 1)).astype(np.float32),
-        "template_all_atom_mask": np.zeros((0, n_res, 37)).astype(np.float32),
-    }
-
-
-class OpenFoldSimpleSingleDataset(torch.utils.data.Dataset):
+class SimpleDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         data_dir: str,
@@ -130,19 +88,24 @@ class OpenFoldSimpleSingleDataset(torch.utils.data.Dataset):
                 "train", "val", or "predict"
         """
         super().__init__()
+        logging.warning(
+            "You are using a simple dataset, which has clean metadata, skips MSA and template and only "
+            "handles single sequence features. Therefore, the following parameters will be ignored:\n"
+            "chain_data_cache_path, alignment_dir, alignment_index, template_mmcif_dir, max_template_date, kalign_binary_path, max_template_hits, obsolete_pdbs_file_path, shuffle_top_k_prefiltered"
+        )
         self.data_dir = data_dir
 
-        self.chain_data_cache = None
-        if chain_data_cache_path is not None:
-            with open(chain_data_cache_path, "r") as fp:
-                self.chain_data_cache = json.load(fp)
-            assert isinstance(self.chain_data_cache, dict)
+        # self.chain_data_cache = None
+        # if chain_data_cache_path is not None:
+        #     with open(chain_data_cache_path, "r") as fp:
+        #         self.chain_data_cache = json.load(fp)
+        #     assert isinstance(self.chain_data_cache, dict)
 
-        self.alignment_dir = alignment_dir
+        # self.alignment_dir = alignment_dir
         self.config = config
         self.treat_pdb_as_distillation = treat_pdb_as_distillation
         self.mode = mode
-        self.alignment_index = alignment_index
+        # self.alignment_index = alignment_index
         self._output_raw = _output_raw
         self._structure_index = _structure_index
 
@@ -158,37 +121,27 @@ class OpenFoldSimpleSingleDataset(torch.utils.data.Dataset):
                 "scripts/generate_mmcif_cache.py before running OpenFold"
             )
 
-        if alignment_index is not None:
-            self._chain_ids = list(alignment_index.keys())
-        else:
-            self._chain_ids = list(os.listdir(alignment_dir))
+        # if alignment_index is not None:
+        #     self._chain_ids = list(alignment_index.keys())
+        # else:
+        #     self._chain_ids = list(os.listdir(alignment_dir))
+        self._chain_ids = [
+            (d, c)
+            for d in os.listdir(data_dir)
+            if os.path.isdir(os.path.join(data_dir, d))
+            for c in os.listdir(os.path.join(data_dir, d))
+            if c.split(".")[-1] in self.supported_exts
+        ]
+        # self._chain_dirs, self._chain_ids = zip(*self._chain_paths)
+        self.chain_data_cache = {
+            c: {"cluster_size": 99, "seq": "A" * 99} for c in self._chain_ids
+        }
 
-        if filter_path is not None:
-            with open(filter_path, "r") as f:
-                chains_to_include = set([l.strip() for l in f.readlines()])
+        # if filter_path is not None:
+        #     with open(filter_path, "r") as f:
+        #         chains_to_include = set([l.strip() for l in f.readlines()])
 
-            self._chain_ids = [c for c in self._chain_ids if c in chains_to_include]
-
-        if self.chain_data_cache is not None:
-            # Filter to include only chains where we have structure data
-            # (entries in chain_data_cache)
-            original_chain_ids = self._chain_ids
-            self._chain_ids = [c for c in self._chain_ids if c in self.chain_data_cache]
-            if len(self._chain_ids) < len(original_chain_ids):
-                missing = [
-                    c for c in original_chain_ids if c not in self.chain_data_cache
-                ]
-                max_to_print = 10
-                missing_examples = ", ".join(missing[:max_to_print])
-                if len(missing) > max_to_print:
-                    missing_examples += ", ..."
-                logging.warning(
-                    "Removing %d alignment entries (%s) with no corresponding "
-                    "entries in chain_data_cache (%s).",
-                    len(missing),
-                    missing_examples,
-                    chain_data_cache_path,
-                )
+            # self._chain_ids = [c for c in self._chain_ids if c in chains_to_include]
 
         self._chain_id_to_idx_dict = {
             chain: i for i, chain in enumerate(self._chain_ids)
@@ -204,11 +157,11 @@ class OpenFoldSimpleSingleDataset(torch.utils.data.Dataset):
         #     _shuffle_top_k_prefiltered=shuffle_top_k_prefiltered,
         # )
 
-        # self.data_pipeline = data_pipeline.DataPipeline(
+        # self.data_pipeline = DataPipeline(
         #     template_featurizer=template_featurizer,
         # )
-        
-        self.data_pipeline = data_pipeline.DataPipeline(
+
+        self.data_pipeline = DataPipeline(
             template_featurizer=None,
         )
         if not self._output_raw:
@@ -244,12 +197,11 @@ class OpenFoldSimpleSingleDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         name = self.idx_to_chain_id(idx)
-        alignment_dir = os.path.join(self.alignment_dir, name)
 
-        alignment_index = None
-        if self.alignment_index is not None:
-            alignment_dir = self.alignment_dir
-            alignment_index = self.alignment_index[name]
+        # alignment_index = None
+        # if self.alignment_index is not None:
+        #     alignment_dir = self.alignment_dir
+        #     alignment_index = self.alignment_index[name]
 
         if self.mode == "train" or self.mode == "eval":
             spl = name.rsplit("_", 1)
@@ -282,14 +234,14 @@ class OpenFoldSimpleSingleDataset(torch.utils.data.Dataset):
                     path,
                     file_id,
                     chain_id,
-                    alignment_dir,
-                    alignment_index,
+                    alignment_dir=None,
+                    alignment_index=None,
                 )
             elif ext == ".core":
                 data = self.data_pipeline.process_core(
                     path,
-                    alignment_dir,
-                    alignment_index,
+                    alignment_dir=None,
+                    alignment_index=None,
                 )
             elif ext == ".pdb":
                 structure_index = None
@@ -297,10 +249,11 @@ class OpenFoldSimpleSingleDataset(torch.utils.data.Dataset):
                     structure_index = self._structure_index[name]
                 data = self.data_pipeline.process_pdb(
                     pdb_path=path,
-                    alignment_dir=alignment_dir,
-                    is_distillation=self.treat_pdb_as_distillation,
+                    alignment_dir=None,
+                    # is_distillation=self.treat_pdb_as_distillation,
+                    is_distillation=True,
                     chain_id=chain_id,
-                    alignment_index=alignment_index,
+                    alignment_index=None,
                     _structure_index=structure_index,
                 )
             else:
@@ -309,8 +262,8 @@ class OpenFoldSimpleSingleDataset(torch.utils.data.Dataset):
             path = os.path.join(name, name + ".fasta")
             data = self.data_pipeline.process_fasta(
                 fasta_path=path,
-                alignment_dir=alignment_dir,
-                alignment_index=alignment_index,
+                alignment_dir=None,
+                alignment_index=None,
             )
 
         if self._output_raw:
@@ -344,51 +297,52 @@ class DataPipeline:
         alignment_dir: str,
         alignment_index: Optional[Any] = None,
     ) -> Mapping[str, Any]:
-        msa_data = {}
-        if alignment_index is not None:
-            fp = open(os.path.join(alignment_dir, alignment_index["db"]), "rb")
+        raise NotImplementedError
+        # msa_data = {}
+        # if alignment_index is not None:
+        #     fp = open(os.path.join(alignment_dir, alignment_index["db"]), "rb")
 
-            def read_msa(start, size):
-                fp.seek(start)
-                msa = fp.read(size).decode("utf-8")
-                return msa
+        #     def read_msa(start, size):
+        #         fp.seek(start)
+        #         msa = fp.read(size).decode("utf-8")
+        #         return msa
 
-            for (name, start, size) in alignment_index["files"]:
-                ext = os.path.splitext(name)[-1]
+        #     for (name, start, size) in alignment_index["files"]:
+        #         ext = os.path.splitext(name)[-1]
 
-                if ext == ".a3m":
-                    msa, deletion_matrix = parsers.parse_a3m(read_msa(start, size))
-                    data = {"msa": msa, "deletion_matrix": deletion_matrix}
-                elif ext == ".sto":
-                    msa, deletion_matrix, _ = parsers.parse_stockholm(
-                        read_msa(start, size)
-                    )
-                    data = {"msa": msa, "deletion_matrix": deletion_matrix}
-                else:
-                    continue
+        #         if ext == ".a3m":
+        #             msa, deletion_matrix = parsers.parse_a3m(read_msa(start, size))
+        #             data = {"msa": msa, "deletion_matrix": deletion_matrix}
+        #         elif ext == ".sto":
+        #             msa, deletion_matrix, _ = parsers.parse_stockholm(
+        #                 read_msa(start, size)
+        #             )
+        #             data = {"msa": msa, "deletion_matrix": deletion_matrix}
+        #         else:
+        #             continue
 
-                msa_data[name] = data
+        #         msa_data[name] = data
 
-            fp.close()
-        else:
-            for f in os.listdir(alignment_dir):
-                path = os.path.join(alignment_dir, f)
-                ext = os.path.splitext(f)[-1]
+        #     fp.close()
+        # else:
+        #     for f in os.listdir(alignment_dir):
+        #         path = os.path.join(alignment_dir, f)
+        #         ext = os.path.splitext(f)[-1]
 
-                if ext == ".a3m":
-                    with open(path, "r") as fp:
-                        msa, deletion_matrix = parsers.parse_a3m(fp.read())
-                    data = {"msa": msa, "deletion_matrix": deletion_matrix}
-                elif ext == ".sto":
-                    with open(path, "r") as fp:
-                        msa, deletion_matrix, _ = parsers.parse_stockholm(fp.read())
-                    data = {"msa": msa, "deletion_matrix": deletion_matrix}
-                else:
-                    continue
+        #         if ext == ".a3m":
+        #             with open(path, "r") as fp:
+        #                 msa, deletion_matrix = parsers.parse_a3m(fp.read())
+        #             data = {"msa": msa, "deletion_matrix": deletion_matrix}
+        #         elif ext == ".sto":
+        #             with open(path, "r") as fp:
+        #                 msa, deletion_matrix, _ = parsers.parse_stockholm(fp.read())
+        #             data = {"msa": msa, "deletion_matrix": deletion_matrix}
+        #         else:
+        #             continue
 
-                msa_data[f] = data
+        #         msa_data[f] = data
 
-        return msa_data
+        # return msa_data
 
     def _parse_template_hits(
         self, alignment_dir: str, alignment_index: Optional[Any] = None
@@ -428,41 +382,43 @@ class DataPipeline:
         input_sequence: Optional[str] = None,
         alignment_index: Optional[str] = None,
     ):
-        msa_data = self._parse_msa_data(alignment_dir, alignment_index)
-        if len(msa_data) == 0:
-            if input_sequence is None:
-                raise ValueError(
-                    """
-                    If the alignment dir contains no MSAs, an input sequence 
-                    must be provided.
-                    """
-                )
-            msa_data["dummy"] = {
-                "msa": [input_sequence],
-                "deletion_matrix": [[0 for _ in input_sequence]],
-            }
+        raise NotImplementedError
+        # msa_data = self._parse_msa_data(alignment_dir, alignment_index)
+        # if len(msa_data) == 0:
+        #     if input_sequence is None:
+        #         raise ValueError(
+        #             """
+        #             If the alignment dir contains no MSAs, an input sequence
+        #             must be provided.
+        #             """
+        #         )
+        #     msa_data["dummy"] = {
+        #         "msa": [input_sequence],
+        #         "deletion_matrix": [[0 for _ in input_sequence]],
+        #     }
 
-        msas, deletion_matrices = zip(
-            *[(v["msa"], v["deletion_matrix"]) for v in msa_data.values()]
-        )
+        # msas, deletion_matrices = zip(
+        #     *[(v["msa"], v["deletion_matrix"]) for v in msa_data.values()]
+        # )
 
-        return msas, deletion_matrices
+        # return msas, deletion_matrices
 
     def _process_msa_feats(
         self,
         alignment_dir: str,
         input_sequence: Optional[str] = None,
-        alignment_index: Optional[str] = None
+        alignment_index: Optional[str] = None,
     ) -> Mapping[str, Any]:
-        msas, deletion_matrices = self._get_msas(
-            alignment_dir, input_sequence, alignment_index
-        )
-        msa_features = make_msa_features(
-            msas=msas,
-            deletion_matrices=deletion_matrices,
-        )
+        raise NotImplementedError
+        # msas, deletion_matrices = self._get_msas(
+        #     alignment_dir, input_sequence, alignment_index
+        # )
+        # msa_features = make_msa_features(
+        #     msas=msas,
+        #     deletion_matrices=deletion_matrices,
+        # )
 
-        return msa_features
+        # return msa_features
 
     def process_fasta(
         self,
@@ -480,12 +436,7 @@ class DataPipeline:
         input_description = input_descs[0]
         num_res = len(input_sequence)
 
-        hits = self._parse_template_hits(alignment_dir, alignment_index)
-        template_features = make_template_features(
-            input_sequence,
-            hits,
-            self.template_featurizer,
-        )
+        template_features = empty_template_feats(len(input_sequence))
 
         sequence_features = make_sequence_features(
             sequence=input_sequence,
@@ -493,9 +444,10 @@ class DataPipeline:
             num_res=num_res,
         )
 
-        msa_features = self._process_msa_feats(
-            alignment_dir, input_sequence, alignment_index
-        )
+        # msa_features = self._process_msa_feats(
+        #     alignment_dir, input_sequence, alignment_index
+        # )
+        msa_features = empty_msa_feats(len(input_sequence))
 
         return {**sequence_features, **msa_features, **template_features}
 
@@ -523,16 +475,12 @@ class DataPipeline:
 
         input_sequence = mmcif.chain_to_seqres[chain_id]
         hits = self._parse_template_hits(alignment_dir, alignment_index)
-        template_features = make_template_features(
-            input_sequence,
-            hits,
-            self.template_featurizer,
-            query_release_date=to_date(mmcif.header["release_date"]),
-        )
+        template_features = empty_template_feats(len(input_sequence))
 
-        msa_features = self._process_msa_feats(
-            alignment_dir, input_sequence, alignment_index,
-        )
+        # msa_features = self._process_msa_feats(
+        #     alignment_dir, input_sequence, alignment_index,
+        # )
+        msa_features = empty_msa_feats(len(input_sequence))
 
         return {**mmcif_feats, **template_features, **msa_features}
 
@@ -568,16 +516,13 @@ class DataPipeline:
             protein_object, description, is_distillation=is_distillation
         )
 
-        hits = self._parse_template_hits(alignment_dir, alignment_index)
-        template_features = make_template_features(
-            input_sequence,
-            hits,
-            self.template_featurizer,
-        )
+        # hits = self._parse_template_hits(alignment_dir, alignment_index)
+        template_features = empty_template_feats(len(input_sequence))
 
-        msa_features = self._process_msa_feats(
-            alignment_dir, input_sequence, alignment_index
-        )
+        # msa_features = self._process_msa_feats(
+        #     alignment_dir, input_sequence, alignment_index
+        # )
+        msa_features = empty_msa_feats(len(input_sequence))
 
         return {**pdb_feats, **template_features, **msa_features}
 
@@ -598,14 +543,16 @@ class DataPipeline:
         description = os.path.splitext(os.path.basename(core_path))[0].upper()
         core_feats = make_protein_features(protein_object, description)
 
-        hits = self._parse_template_hits(alignment_dir, alignment_index)
-        template_features = make_template_features(
-            input_sequence,
-            hits,
-            self.template_featurizer,
-        )
+        # hits = self._parse_template_hits(alignment_dir, alignment_index)
+        # template_features = make_template_features(
+        #     input_sequence,
+        #     hits,
+        #     self.template_featurizer,
+        # )
+        template_features = empty_template_feats(len(input_sequence))
 
-        msa_features = self._process_msa_feats(alignment_dir, input_sequence)
+        # msa_features = self._process_msa_feats(alignment_dir, input_sequence)
+        msa_features = empty_msa_feats(len(input_sequence))
 
         return {**core_feats, **template_features, **msa_features}
 
@@ -644,45 +591,47 @@ class DataPipeline:
             total_offset += sl
             sequence_features["residue_index"][total_offset:] += ri_gap
 
-        msa_list = []
-        deletion_mat_list = []
-        for seq, desc in zip(input_seqs, input_descs):
-            alignment_dir = os.path.join(super_alignment_dir, desc)
-            msas, deletion_mats = self._get_msas(alignment_dir, seq, None)
-            msa_list.append(msas)
-            deletion_mat_list.append(deletion_mats)
+        # msa_list = []
+        # deletion_mat_list = []
+        # for seq, desc in zip(input_seqs, input_descs):
+        #     alignment_dir = os.path.join(super_alignment_dir, desc)
+        #     msas, deletion_mats = self._get_msas(alignment_dir, seq, None)
+        #     msa_list.append(msas)
+        #     deletion_mat_list.append(deletion_mats)
 
-        final_msa = []
-        final_deletion_mat = []
-        msa_it = enumerate(zip(msa_list, deletion_mat_list))
-        for i, (msas, deletion_mats) in msa_it:
-            prec, post = sum(seq_lens[:i]), sum(seq_lens[i + 1 :])
-            msas = [[prec * "-" + seq + post * "-" for seq in msa] for msa in msas]
-            deletion_mats = [
-                [prec * [0] + dml + post * [0] for dml in deletion_mat]
-                for deletion_mat in deletion_mats
-            ]
+        # final_msa = []
+        # final_deletion_mat = []
+        # msa_it = enumerate(zip(msa_list, deletion_mat_list))
+        # for i, (msas, deletion_mats) in msa_it:
+        #     prec, post = sum(seq_lens[:i]), sum(seq_lens[i + 1 :])
+        #     msas = [[prec * "-" + seq + post * "-" for seq in msa] for msa in msas]
+        #     deletion_mats = [
+        #         [prec * [0] + dml + post * [0] for dml in deletion_mat]
+        #         for deletion_mat in deletion_mats
+        #     ]
 
-            assert len(msas[0][-1]) == len(input_sequence)
+        #     assert len(msas[0][-1]) == len(input_sequence)
 
-            final_msa.extend(msas)
-            final_deletion_mat.extend(deletion_mats)
+        #     final_msa.extend(msas)
+        #     final_deletion_mat.extend(deletion_mats)
 
-        #TODO: add no msa and no template options
-        msa_features = make_msa_features(
-            msas=final_msa,
-            deletion_matrices=final_deletion_mat,
-        )
+        # TODO: add no msa and no template options
+        # msa_features = make_msa_features(
+        #     msas=final_msa,
+        #     deletion_matrices=final_deletion_mat,
+        # )
+        msa_features = empty_msa_feats(len(input_sequence))
 
         template_feature_list = []
         for seq, desc in zip(input_seqs, input_descs):
             alignment_dir = os.path.join(super_alignment_dir, desc)
-            hits = self._parse_template_hits(alignment_dir, alignment_index=None)
-            template_features = make_template_features(
-                seq,
-                hits,
-                self.template_featurizer,
-            )
+            # hits = self._parse_template_hits(alignment_dir, alignment_index=None)
+            # template_features = make_template_features(
+            #     seq,
+            #     hits,
+            #     self.template_featurizer,
+            # )
+            template_features = empty_template_feats(len(seq))
             template_feature_list.append(template_features)
 
         template_features = unify_template_features(template_feature_list)
@@ -709,38 +658,6 @@ def make_sequence_features(
     features["residue_index"] = np.array(range(num_res), dtype=np.int32)
     features["seq_length"] = np.array([num_res] * num_res, dtype=np.int32)
     features["sequence"] = np.array([sequence.encode("utf-8")], dtype=np.object_)
-    return features
-
-
-def make_msa_features(
-    msas: Sequence[Sequence[str]],
-    deletion_matrices: Sequence[parsers.DeletionMatrix],
-) -> FeatureDict:
-    """Constructs a feature dict of MSA features."""
-    if not msas:
-        raise ValueError("At least one MSA must be provided.")
-
-    int_msa = []
-    deletion_matrix = []
-    seen_sequences = set()
-    for msa_index, msa in enumerate(msas):
-        if not msa:
-            raise ValueError(f"MSA {msa_index} must contain at least one sequence.")
-        for sequence_index, sequence in enumerate(msa):
-            if sequence in seen_sequences:
-                continue
-            seen_sequences.add(sequence)
-            int_msa.append(
-                [residue_constants.HHBLITS_AA_TO_ID[res] for res in sequence]
-            )
-            deletion_matrix.append(deletion_matrices[msa_index][sequence_index])
-
-    num_res = len(msas[0][0])
-    num_alignments = len(int_msa)
-    features = {}
-    features["deletion_matrix_int"] = np.array(deletion_matrix, dtype=np.int32)
-    features["msa"] = np.array(int_msa, dtype=np.int32)
-    features["num_alignments"] = np.array([num_alignments] * num_res, dtype=np.int32)
     return features
 
 
@@ -780,56 +697,11 @@ def make_mmcif_features(
     return mmcif_feats
 
 
-
-def unify_template_features(
-    template_feature_list: Sequence[FeatureDict],
-) -> FeatureDict:
-    out_dicts = []
-    seq_lens = [fd["template_aatype"].shape[1] for fd in template_feature_list]
-    for i, fd in enumerate(template_feature_list):
-        out_dict = {}
-        n_templates, n_res = fd["template_aatype"].shape[:2]
-        for k, v in fd.items():
-            seq_keys = [
-                "template_aatype",
-                "template_all_atom_positions",
-                "template_all_atom_mask",
-            ]
-            if k in seq_keys:
-                new_shape = list(v.shape)
-                assert new_shape[1] == n_res
-                new_shape[1] = sum(seq_lens)
-                new_array = np.zeros(new_shape, dtype=v.dtype)
-
-                if k == "template_aatype":
-                    new_array[..., residue_constants.HHBLITS_AA_TO_ID["-"]] = 1
-
-                offset = sum(seq_lens[:i])
-                new_array[:, offset : offset + seq_lens[i]] = v
-                out_dict[k] = new_array
-            else:
-                out_dict[k] = v
-
-        chain_indices = np.array(n_templates * [i])
-        out_dict["template_chain_index"] = chain_indices
-
-        if n_templates != 0:
-            out_dicts.append(out_dict)
-
-    if len(out_dicts) > 0:
-        out_dict = {
-            k: np.concatenate([od[k] for od in out_dicts]) for k in out_dicts[0]
-        }
-    else:
-        out_dict = empty_template_feats(sum(seq_lens))
-
-    return out_dict
-
-
 def _aatype_to_str_sequence(aatype):
     return "".join(
         [residue_constants.restypes_with_x[aatype[i]] for i in range(len(aatype))]
     )
+
 
 def make_protein_features(
     protein_object: protein.Protein,
@@ -877,3 +749,124 @@ def make_pdb_features(
         pdb_feats["all_atom_mask"] *= high_confidence[..., None]
 
     return pdb_feats
+
+
+# def make_msa_features(
+#     msas: Sequence[Sequence[str]],
+#     deletion_matrices: Sequence[parsers.DeletionMatrix],
+# ) -> FeatureDict:
+#     """Constructs a feature dict of MSA features."""
+#     if not msas:
+#         raise ValueError("At least one MSA must be provided.")
+
+#     int_msa = []
+#     deletion_matrix = []
+#     seen_sequences = set()
+#     for msa_index, msa in enumerate(msas):
+#         if not msa:
+#             raise ValueError(f"MSA {msa_index} must contain at least one sequence.")
+#         for sequence_index, sequence in enumerate(msa):
+#             if sequence in seen_sequences:
+#                 continue
+#             seen_sequences.add(sequence)
+#             int_msa.append(
+#                 [residue_constants.HHBLITS_AA_TO_ID[res] for res in sequence]
+#             )
+#             deletion_matrix.append(deletion_matrices[msa_index][sequence_index])
+
+#     num_res = len(msas[0][0])
+#     num_alignments = len(int_msa)
+#     features = {}
+#     features["deletion_matrix_int"] = np.array(deletion_matrix, dtype=np.int32)
+#     features["msa"] = np.array(int_msa, dtype=np.int32)
+#     features["num_alignments"] = np.array([num_alignments] * num_res, dtype=np.int32)
+#     return features
+
+
+# def make_template_features(
+#     input_sequence: str,
+#     hits: Sequence[Any],
+#     template_featurizer: Any,
+#     query_pdb_code: Optional[str] = None,
+#     query_release_date: Optional[str] = None,
+# ) -> FeatureDict:
+#     hits_cat = sum(hits.values(), [])
+#     if len(hits_cat) == 0 or template_featurizer is None:
+#         template_features = empty_template_feats(len(input_sequence))
+#     else:
+#         templates_result = template_featurizer.get_templates(
+#             query_sequence=input_sequence,
+#             query_pdb_code=query_pdb_code,
+#             query_release_date=query_release_date,
+#             hits=hits_cat,
+#         )
+#         template_features = templates_result.features
+
+#         # The template featurizer doesn't format empty template features
+#         # properly. This is a quick fix.
+#         if template_features["template_aatype"].shape[0] == 0:
+#             template_features = empty_template_feats(len(input_sequence))
+
+#     return template_features
+
+
+def unify_template_features(
+    template_feature_list: Sequence[FeatureDict],
+) -> FeatureDict:
+    out_dicts = []
+    seq_lens = [fd["template_aatype"].shape[1] for fd in template_feature_list]
+    for i, fd in enumerate(template_feature_list):
+        out_dict = {}
+        n_templates, n_res = fd["template_aatype"].shape[:2]
+        for k, v in fd.items():
+            seq_keys = [
+                "template_aatype",
+                "template_all_atom_positions",
+                "template_all_atom_mask",
+            ]
+            if k in seq_keys:
+                new_shape = list(v.shape)
+                assert new_shape[1] == n_res
+                new_shape[1] = sum(seq_lens)
+                new_array = np.zeros(new_shape, dtype=v.dtype)
+
+                if k == "template_aatype":
+                    new_array[..., residue_constants.HHBLITS_AA_TO_ID["-"]] = 1
+
+                offset = sum(seq_lens[:i])
+                new_array[:, offset : offset + seq_lens[i]] = v
+                out_dict[k] = new_array
+            else:
+                out_dict[k] = v
+
+        chain_indices = np.array(n_templates * [i])
+        out_dict["template_chain_index"] = chain_indices
+
+        if n_templates != 0:
+            out_dicts.append(out_dict)
+
+    if len(out_dicts) > 0:
+        out_dict = {
+            k: np.concatenate([od[k] for od in out_dicts]) for k in out_dicts[0]
+        }
+    else:
+        out_dict = empty_template_feats(sum(seq_lens))
+
+    return out_dict
+
+
+def empty_template_feats(n_res) -> FeatureDict:
+    return {
+        "template_aatype": np.zeros((0, n_res)).astype(np.int64),
+        "template_all_atom_positions": np.zeros((0, n_res, 37, 3)).astype(np.float32),
+        "template_sum_probs": np.zeros((0, 1)).astype(np.float32),
+        "template_all_atom_mask": np.zeros((0, n_res, 37)).astype(np.float32),
+    }
+
+
+def empty_msa_feats(num_msas_all, num_res) -> FeatureDict:
+    return {
+        "msa": np.full((num_msas_all, num_res), -999, dtype=np.int32),
+        "deletion_matrix_int": np.full((num_msas_all, num_res), -999, dtype=np.int32),
+        "num_alignment": np.full(num_msas_all, -999, dtype=np.int32),
+    }

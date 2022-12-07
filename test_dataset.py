@@ -4,6 +4,7 @@ import json
 import ml_collections as mlc
 
 from openfold.data.data_modules import OpenFoldSingleDataset
+from openfold.data.baseline_modules import SimpleDataset
 from test_datamodule import args, update_config
 
 
@@ -21,16 +22,31 @@ obsolete_pdbs_file_path = (
 
 train_data_dir = "/scratch/00946/zzhang/data/openfold/ls6-tacc/pdb_mmcif/mmcif_files"
 # train_data_dir = "/work/09101/whatever/data/example/alphafold"
+dataset = OpenFoldSingleDataset
 
 setting = "msa"
 if setting == "msa":
     train_alignment_dir = "/scratch/00946/zzhang/data/openfold/ls6-tacc/alignment_db"
     alignment_index_path = "/scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/chain_lists/duplicated_super_fix.index"
-    val_alignment_dir = "/scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/val_set/alignments"
+    val_alignment_dir = (
+        "/scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/val_set/alignments"
+    )
 elif setting == "baseline":
     train_alignment_dir = "/scratch/09101/whatever/data/openfold/alignment_db"
-    alignment_index_path = "/scratch/09101/whatever/data/openfold/alignment_db/duplicated_super_fix.index"
+    alignment_index_path = (
+        "/scratch/09101/whatever/data/openfold/alignment_db/duplicated_super_fix.index"
+    )
     val_alignment_dir = "/scratch/09101/whatever/data/openfold/val_set"
+elif setting == "baseline_simple":
+    train_alignment_dir = None
+    alignment_index_path = None
+    val_alignment_dir = None
+    template_mmcif_dir = None
+    max_template_date = None
+    template_release_dates_cache_path = None
+    kalign_binary_path = None
+else:
+    raise ValueError()
 
 train_chain_data_cache_path = (
     "/scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/prot_data_cache.json"
@@ -38,6 +54,9 @@ train_chain_data_cache_path = (
 train_filter_path = None
 alignment_index = None
 val_data_dir = "/scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/val_set/data"
+
+distillation_data_dir = "/work/09101/whatever/data/example/esmfold/001"
+# distillation_chain_data_cache_path
 
 if alignment_index_path is not None:
     with open(alignment_index_path, "r") as fp:
@@ -56,8 +75,8 @@ if args["config_lowprec"]:
     with open(f"configs/low_prec.json") as f:
         config = update_config(config, json.load(f))
 
-config = mlc.ConfigDict(config)
-config = config["data"]
+config: dict = mlc.ConfigDict(config)
+config: dict = config["data"]
 dataset_gen = partial(
     OpenFoldSingleDataset,
     template_mmcif_dir=template_mmcif_dir,
@@ -79,6 +98,19 @@ train_dataset = dataset_gen(
     mode="train",
     alignment_index=alignment_index,
 )
+
+if distillation_data_dir is not None:
+    train_distil_dataset = dataset_gen(
+        data_dir=distillation_data_dir,
+        chain_data_cache_path=distillation_chain_data_cache_path,
+        alignment_dir=None,
+        filter_path=train_filter_path,
+        max_template_hits=config["train"]["max_template_hits"],
+        treat_pdb_as_distillation=True,
+        mode="train",
+        alignment_index=distillation_alignment_index,
+        _structure_index=_distillation_structure_index,
+    )
 
 eval_dataset = dataset_gen(
     data_dir=val_data_dir,
