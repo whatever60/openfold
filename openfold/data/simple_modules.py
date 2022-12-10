@@ -12,8 +12,13 @@ import pytorch_lightning as pl
 import torch
 from torch.utils.data import RandomSampler
 
-from openfold.utils.tensor_utils import tensor_tree_map, dict_multimap
-from openfold.data import templates, parsers, mmcif_parsing, feature_pipeline
+from openfold.data import (
+    templates,
+    parsers,
+    mmcif_parsing,
+    feature_pipeline,
+    data_pipeline,
+)
 from openfold.np import residue_constants, protein
 from openfold.data.tools.utils import to_date
 
@@ -91,7 +96,7 @@ class SimpleDataset(torch.utils.data.Dataset):
         logging.warning(
             "You are using a simple dataset, which has clean metadata, skips MSA and template and only "
             "handles single sequence features. Therefore, the following parameters will be ignored:\n"
-            "chain_data_cache_path, alignment_dir, alignment_index, template_mmcif_dir, max_template_date, kalign_binary_path, max_template_hits, obsolete_pdbs_file_path, shuffle_top_k_prefiltered"
+            "chain_data_cache_path, alignment_dir, alignment_index, template_mmcif_dir, template_release_dates_cache_path, max_template_date, kalign_binary_path, max_template_hits, obsolete_pdbs_file_path, shuffle_top_k_prefiltered"
         )
         self.data_dir = data_dir
 
@@ -115,11 +120,11 @@ class SimpleDataset(torch.utils.data.Dataset):
         if mode not in valid_modes:
             raise ValueError(f"mode must be one of {valid_modes}")
 
-        if template_release_dates_cache_path is None:
-            logging.warning(
-                "Template release dates cache does not exist. Remember to run "
-                "scripts/generate_mmcif_cache.py before running OpenFold"
-            )
+        # if template_release_dates_cache_path is None:
+        #     logging.warning(
+        #         "Template release dates cache does not exist. Remember to run "
+        #         "scripts/generate_mmcif_cache.py before running OpenFold"
+        #     )
 
         # if alignment_index is not None:
         #     self._chain_ids = list(alignment_index.keys())
@@ -141,7 +146,7 @@ class SimpleDataset(torch.utils.data.Dataset):
         #     with open(filter_path, "r") as f:
         #         chains_to_include = set([l.strip() for l in f.readlines()])
 
-            # self._chain_ids = [c for c in self._chain_ids if c in chains_to_include]
+        # self._chain_ids = [c for c in self._chain_ids if c in chains_to_include]
 
         self._chain_id_to_idx_dict = {
             chain: i for i, chain in enumerate(self._chain_ids)
@@ -447,7 +452,7 @@ class DataPipeline:
         # msa_features = self._process_msa_feats(
         #     alignment_dir, input_sequence, alignment_index
         # )
-        msa_features = empty_msa_feats(len(input_sequence))
+        msa_features = empty_msa_feats(input_sequence)
 
         return {**sequence_features, **msa_features, **template_features}
 
@@ -474,24 +479,24 @@ class DataPipeline:
         mmcif_feats = make_mmcif_features(mmcif, chain_id)
 
         input_sequence = mmcif.chain_to_seqres[chain_id]
-        hits = self._parse_template_hits(alignment_dir, alignment_index)
+        # hits = self._parse_template_hits(alignment_dir, alignment_index)
         template_features = empty_template_feats(len(input_sequence))
 
         # msa_features = self._process_msa_feats(
         #     alignment_dir, input_sequence, alignment_index,
         # )
-        msa_features = empty_msa_feats(len(input_sequence))
+        msa_features = empty_msa_feats(input_sequence)
 
         return {**mmcif_feats, **template_features, **msa_features}
 
     def process_pdb(
         self,
         pdb_path: str,
-        alignment_dir: str,
+        # alignment_dir: str,
         is_distillation: bool = True,
         chain_id: Optional[str] = None,
         _structure_index: Optional[str] = None,
-        alignment_index: Optional[str] = None,
+        # alignment_index: Optional[str] = None,
     ) -> FeatureDict:
         """
         Assembles features for a protein in a PDB file.
@@ -522,7 +527,7 @@ class DataPipeline:
         # msa_features = self._process_msa_feats(
         #     alignment_dir, input_sequence, alignment_index
         # )
-        msa_features = empty_msa_feats(len(input_sequence))
+        msa_features = empty_msa_feats(pdb_feats["aatype"])
 
         return {**pdb_feats, **template_features, **msa_features}
 
@@ -552,7 +557,7 @@ class DataPipeline:
         template_features = empty_template_feats(len(input_sequence))
 
         # msa_features = self._process_msa_feats(alignment_dir, input_sequence)
-        msa_features = empty_msa_feats(len(input_sequence))
+        msa_features = empty_msa_feats(input_sequence)
 
         return {**core_feats, **template_features, **msa_features}
 
@@ -620,7 +625,7 @@ class DataPipeline:
         #     msas=final_msa,
         #     deletion_matrices=final_deletion_mat,
         # )
-        msa_features = empty_msa_feats(len(input_sequence))
+        msa_features = empty_msa_feats(input_sequence)
 
         template_feature_list = []
         for seq, desc in zip(input_seqs, input_descs):
@@ -641,6 +646,279 @@ class DataPipeline:
             **msa_features,
             **template_features,
         }
+
+
+class PDBSimpleSingleDataset(torch.utils.data.Dataset):
+    """
+    Structure data in mmCIF format (thus no structure index).
+    No template and MSA.
+    Has filtering and caching.
+    """
+
+    ext = ".cif"
+
+    def __init__(
+        self,
+        chain_index_path: str,
+        data_dir: str,
+        config: mlc.ConfigDict,
+        chain_data_cache_path: Optional[str] = None,
+        filter_path: Optional[str] = None,
+        mode: str = "train",
+        _output_raw: bool = False,
+    ):
+        super().__init__()
+        self.data_dir = data_dir
+        # self.config = config
+        self.mode = mode
+        self.mode = mode
+        self._output_raw = _output_raw
+
+        with open(chain_index_path) as f:
+            self._chain_ids = json.load(f)["data"]
+
+        if filter_path is not None:
+            with open(filter_path, "r") as f:
+                chains_to_include = set([l.strip() for l in f.readlines()])
+
+            self._chain_ids = [c for c in self._chain_ids if c in chains_to_include]
+
+        if chain_data_cache_path is not None:
+            with open(chain_data_cache_path, "r") as f:
+                self.chain_data_cache = json.load(f)
+            assert isinstance(self.chain_data_cache, dict)
+        else:
+            self.chain_data_cache = None
+
+        if self.chain_data_cache is not None:
+            # Filter to include only chains where we have structure data
+            # (entries in chain_data_cache)
+            # import pdb; pdb.set_trace()
+            original_chain_ids = self._chain_ids
+            self._chain_ids = [c for c in self._chain_ids if c in self.chain_data_cache]
+            if len(self._chain_ids) < len(original_chain_ids):
+                missing = [
+                    c for c in original_chain_ids if c not in self.chain_data_cache
+                ]
+                max_to_print = 10
+                missing_examples = ", ".join(missing[:max_to_print])
+                if len(missing) > max_to_print:
+                    missing_examples += ", ..."
+                logging.warning(
+                    "Removing %d alignment entries (%s) with no corresponding "
+                    "entries in chain_data_cache (%s).",
+                    len(missing),
+                    missing_examples,
+                    chain_data_cache_path,
+                )
+
+        self._chain_id_to_idx_dict = {
+            chain: i for i, chain in enumerate(self._chain_ids)
+        }
+
+        self.data_pipeline = DataPipeline(template_featurizer=None)
+        if not self._output_raw:
+            self.feature_pipeline = feature_pipeline.FeaturePipeline(config)
+
+    def chain_id_to_idx(self, chain_id):
+        return self._chain_id_to_idx_dict[chain_id]
+
+    def idx_to_chain_id(self, idx):
+        return self._chain_ids[idx]
+
+    def _parse_mmcif(self, path, file_id, chain_id):
+        with open(path, "r") as f:
+            mmcif_string = f.read()
+
+        mmcif_object = mmcif_parsing.parse(file_id=file_id, mmcif_string=mmcif_string)
+
+        # Crash if an error is encountered. Any parsing errors should have
+        # been dealt with at the alignment stage.
+        if mmcif_object.mmcif_object is None:
+            raise list(mmcif_object.errors.values())[0]
+
+        mmcif_object = mmcif_object.mmcif_object
+
+        data = self.data_pipeline.process_mmcif(
+            mmcif=mmcif_object,
+            chain_id=chain_id,
+            alignment_dir=None,
+            alignment_index=None,
+        )
+
+        return data
+
+    def __len__(self):
+        return len(self._chain_ids)
+
+    def __getitem__(self, idx):
+        name = self.idx_to_chain_id(idx)
+
+        # alignment_index = None
+        # if self.alignment_index is not None:
+        #     alignment_dir = self.alignment_dir
+        #     alignment_index = self.alignment_index[name]
+
+        if self.mode == "train" or self.mode == "eval":
+            spl = name.rsplit("_", 1)
+            if len(spl) == 2:
+                file_id, chain_id = spl
+            else:
+                (file_id,) = spl
+                chain_id = None
+
+            path = os.path.join(self.data_dir, file_id)
+
+            path += self.ext
+            data = self._parse_mmcif(
+                path,
+                file_id,
+                chain_id,
+            )
+        else:
+            path = os.path.join(name, name + ".fasta")
+            data = self.data_pipeline.process_fasta(
+                fasta_path=path,
+                alignment_dir=None,
+                alignment_index=None,
+            )
+
+        if self._output_raw:
+            return data
+
+        feats = self.feature_pipeline.process_features(data, self.mode)
+
+        feats["batch_idx"] = torch.tensor(
+            [idx for _ in range(feats["aatype"].shape[-1])],
+            dtype=torch.int64,
+            device=feats["aatype"].device,
+        )
+
+        return feats
+
+
+class OpenFoldSimpleSingleDataset(torch.utils.data.Dataset):
+    """
+    Structure data in PDB format. 270000 UniClust30 chains predicted with AF2.
+    Directory structure as specified in https://docs.google.com/document/d/1R90-VJSLQEbot7tgXF3zb068Y1ZJAmsckQ_t2sJTv2c
+    No template and MSA.
+    Has caching but no filtering.
+    """
+
+    ext = ".pdb"
+
+    def __init__(
+        self,
+        # chain_index_path: str,
+        data_dir: str,
+        config: mlc.ConfigDict,
+        chain_data_cache_path: Optional[str] = None,
+        # filter_path: Optional[str] = None,
+        mode: str = "train",
+        _output_raw: bool = False,
+        _structure_index: Optional[Any] = None,
+    ):
+        super().__init__()
+        self.data_dir = data_dir
+        self.mode = mode
+        self.mode = mode
+        self._output_raw = _output_raw
+
+        self._chain_ids = [d for d in os.listdir(data_dir) if os.path.isdir(d)]
+
+        if chain_data_cache_path is not None:
+            with open(chain_data_cache_path, "r") as f:
+                self.chain_data_cache = json.load(f)
+            assert isinstance(self.chain_data_cache, dict)
+        else:
+            self.chain_data_cache = None
+        self._structure_index = _structure_index
+
+        # chain_data_cache is not used to filter data. There is no point of doing this for distillation dataset.
+
+        # if self.chain_data_cache is not None:
+        #     # Filter to include only chains where we have structure data
+        #     # (entries in chain_data_cache)
+        #     # import pdb; pdb.set_trace()
+        #     original_chain_ids = self._chain_ids
+        #     self._chain_ids = [c for c in self._chain_ids if c in self.chain_data_cache]
+        #     if len(self._chain_ids) < len(original_chain_ids):
+        #         missing = [
+        #             c for c in original_chain_ids if c not in self.chain_data_cache
+        #         ]
+        #         max_to_print = 10
+        #         missing_examples = ", ".join(missing[:max_to_print])
+        #         if len(missing) > max_to_print:
+        #             missing_examples += ", ..."
+        #         logging.warning(
+        #             "Removing %d alignment entries (%s) with no corresponding "
+        #             "entries in chain_data_cache (%s).",
+        #             len(missing),
+        #             missing_examples,
+        #             chain_data_cache_path,
+        #         )
+
+        self._chain_id_to_idx_dict = {
+            chain: i for i, chain in enumerate(self._chain_ids)
+        }
+
+        self.data_pipeline = DataPipeline(template_featurizer=None)
+        if not self._output_raw:
+            self.feature_pipeline = feature_pipeline.FeaturePipeline(config)
+
+    def chain_id_to_idx(self, chain_id):
+        return self._chain_id_to_idx_dict[chain_id]
+
+    def idx_to_chain_id(self, idx):
+        return self._chain_ids[idx]
+
+    def __len__(self):
+        return len(self._chain_ids)
+
+    def __getitem__(self, idx):
+        name = self.idx_to_chain_id(idx)
+        if self.mode == "train" or self.mode == "eval":
+            spl = name.rsplit("_", 1)
+            if len(spl) == 2:
+                file_id, chain_id = spl
+            else:
+                (file_id,) = spl
+                chain_id = None
+
+            # ==== note this line ====
+            path = os.path.join(self.data_dir, file_id, file_id)
+            # ========================
+
+            path += self.ext
+            structure_index = None
+            if self._structure_index is not None:
+                structure_index = self._structure_index[name]
+            data = self.data_pipeline.process_pdb(
+                pdb_path=path,
+                is_distillation=True,
+                chain_id=chain_id,
+                _structure_index=structure_index,
+            )
+        else:
+            path = os.path.join(name, name + ".fasta")
+            data = self.data_pipeline.process_fasta(
+                fasta_path=path,
+                alignment_dir=None,
+                alignment_index=None,
+            )
+
+        if self._output_raw:
+            return data
+
+        feats = self.feature_pipeline.process_features(data, self.mode)
+
+        feats["batch_idx"] = torch.tensor(
+            [idx for _ in range(feats["aatype"].shape[-1])],
+            dtype=torch.int64,
+            device=feats["aatype"].device,
+        )
+
+        return feats
 
 
 def make_sequence_features(
@@ -751,38 +1029,6 @@ def make_pdb_features(
     return pdb_feats
 
 
-# def make_msa_features(
-#     msas: Sequence[Sequence[str]],
-#     deletion_matrices: Sequence[parsers.DeletionMatrix],
-# ) -> FeatureDict:
-#     """Constructs a feature dict of MSA features."""
-#     if not msas:
-#         raise ValueError("At least one MSA must be provided.")
-
-#     int_msa = []
-#     deletion_matrix = []
-#     seen_sequences = set()
-#     for msa_index, msa in enumerate(msas):
-#         if not msa:
-#             raise ValueError(f"MSA {msa_index} must contain at least one sequence.")
-#         for sequence_index, sequence in enumerate(msa):
-#             if sequence in seen_sequences:
-#                 continue
-#             seen_sequences.add(sequence)
-#             int_msa.append(
-#                 [residue_constants.HHBLITS_AA_TO_ID[res] for res in sequence]
-#             )
-#             deletion_matrix.append(deletion_matrices[msa_index][sequence_index])
-
-#     num_res = len(msas[0][0])
-#     num_alignments = len(int_msa)
-#     features = {}
-#     features["deletion_matrix_int"] = np.array(deletion_matrix, dtype=np.int32)
-#     features["msa"] = np.array(int_msa, dtype=np.int32)
-#     features["num_alignments"] = np.array([num_alignments] * num_res, dtype=np.int32)
-#     return features
-
-
 # def make_template_features(
 #     input_sequence: str,
 #     hits: Sequence[Any],
@@ -864,9 +1110,26 @@ def empty_template_feats(n_res) -> FeatureDict:
     }
 
 
-def empty_msa_feats(num_msas_all, num_res) -> FeatureDict:
-    return {
-        "msa": np.full((num_msas_all, num_res), -999, dtype=np.int32),
-        "deletion_matrix_int": np.full((num_msas_all, num_res), -999, dtype=np.int32),
-        "num_alignment": np.full(num_msas_all, -999, dtype=np.int32),
-    }
+def empty_msa_feats(input_sequence, num_msas_all=None) -> FeatureDict:
+    num_res = len(input_sequence)
+
+    single_sequence_msa = data_pipeline.make_msa_features(
+        [[input_sequence]], [[[0 for _ in input_sequence]]]
+    )
+
+    if num_msas_all is None:
+        return single_sequence_msa
+    else:
+        return {
+            "msa": np.concatenate(
+                [
+                    single_sequence_msa["msa"],
+                    np.full((num_msas_all - 1, num_res), -999, dtype=np.int32),
+                ],
+                axis=0,
+            ),
+            "deletion_matrix_int": np.zeros(
+                (num_msas_all, num_res), -999, dtype=np.int32
+            ),
+            "num_alignment": np.full(num_msas_all, -999, dtype=np.int32),
+        }

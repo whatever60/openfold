@@ -23,6 +23,7 @@ from openfold.data import (
     templates,
 )
 from openfold.utils.tensor_utils import tensor_tree_map, dict_multimap
+from openfold.data import simple_modules
 
 
 class OpenFoldSingleDataset(torch.utils.data.Dataset):
@@ -318,7 +319,7 @@ def get_stochastic_train_filter_prob(
     # Stochastic filters
     probabilities = []
 
-    cluster_si  ze = chain_data_cache_entry.get("cluster_size", None)
+    cluster_size = chain_data_cache_entry.get("cluster_size", None)
     if cluster_size is not None and cluster_size > 0:
         probabilities.append(1 / cluster_size)
 
@@ -386,8 +387,8 @@ class OpenFoldDataset(torch.utils.data.Dataset):
             idx_iter = looped_shuffled_dataset_idx(len(dataset))
             chain_data_cache: dict = dataset.chain_data_cache
             while True:
-                # ideally, each chain has a fixed probability, and a numpy.random.choice would solve the problem, but we need to 
-                # stick to pytorch random generator. However, pytorch doesn't have random 
+                # ideally, each chain has a fixed probability, and a numpy.random.choice would solve the problem, but we need to
+                # stick to pytorch random generator. However, pytorch doesn't have random
                 # choice function. Therefore, we use multinomial.
                 weights = []
                 idx = []
@@ -460,6 +461,7 @@ class OpenFoldDataLoader(torch.utils.data.DataLoader):
     Both recycling and clamping FAPE are batch-level property, i.e., they need to have the
     same value across GPUs. Thus the same generator is copied to all processes.
     """
+
     def __init__(self, *args, config, stage="train", generator=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.config = config
@@ -553,6 +555,7 @@ class OpenFoldDataModule(pl.LightningDataModule):
     """
     There are two random generators, one for DataLoader and one for Dataset.
     """
+
     def __init__(
         self,
         config: mlc.ConfigDict,
@@ -578,6 +581,10 @@ class OpenFoldDataModule(pl.LightningDataModule):
         _distillation_structure_index_path: Optional[str] = None,
         alignment_index_path: Optional[str] = None,
         distillation_alignment_index_path: Optional[str] = None,
+        simple: bool = False,
+        chain_index_path_train: Optional[str] = None,
+        chain_index_path_distillation: Optional[str] = None,
+        chain_index_path_val: Optional[str] = None,
         **kwargs,
     ):
         super(OpenFoldDataModule, self).__init__()
@@ -602,6 +609,10 @@ class OpenFoldDataModule(pl.LightningDataModule):
         self.obsolete_pdbs_file_path = obsolete_pdbs_file_path
         self.batch_seed = batch_seed
         self.train_epoch_len = train_epoch_len
+        self.simple = simple
+        self.chain_index_path_train = chain_index_path_train
+        self.chain_index_path_distillation = chain_index_path_distillation
+        self.chain_index_path_val = chain_index_path_val
 
         if self.train_data_dir is None and self.predict_data_dir is None:
             raise ValueError(
@@ -610,6 +621,9 @@ class OpenFoldDataModule(pl.LightningDataModule):
             )
 
         self.training_mode = self.train_data_dir is not None
+
+        if self.simple is True:
+            assert self.training_mode is True
 
         if self.training_mode and train_alignment_dir is None:
             raise ValueError("In training mode, train_alignment_dir must be specified")
@@ -639,6 +653,18 @@ class OpenFoldDataModule(pl.LightningDataModule):
             with open(distillation_alignment_index_path, "r") as fp:
                 self.distillation_alignment_index = json.load(fp)
 
+    @staticmethod
+    def make_distillation_simple_dataset(data_dir: str, chain_data_cache_path: str):
+        if "alphafold" in data_dir or "esmfold" in data_dir:
+            dataset = simple_modules.AtlasSimpleSingleDataset
+        elif "openfold" in data_dir:
+            dataset = simple_modules.OpenFoldSimpleSingleDataset
+        else:
+            raise ValueError()
+        return dataset(
+            data_dir=data_dir, chain_data_cache_path=chain_data_cache_path, mode="train"
+        )
+
     def setup(self):
         # Most of the arguments are the same for the three datasets
         dataset_gen = partial(
@@ -652,41 +678,84 @@ class OpenFoldDataModule(pl.LightningDataModule):
         )
 
         if self.training_mode:
-            train_dataset = dataset_gen(
-                data_dir=self.train_data_dir,
-                chain_data_cache_path=self.train_chain_data_cache_path,
-                alignment_dir=self.train_alignment_dir,
-                filter_path=self.train_filter_path,
-                max_template_hits=self.config.train.max_template_hits,
-                shuffle_top_k_prefiltered=self.config.train.shuffle_top_k_prefiltered,
-                treat_pdb_as_distillation=False,
-                mode="train",
-                alignment_index=self.alignment_index,
-            )
-
-            distillation_dataset = None
-            if self.distillation_data_dir is not None:
-                distillation_dataset = dataset_gen(
-                    data_dir=self.distillation_data_dir,
-                    chain_data_cache_path=self.distillation_chain_data_cache_path,
-                    alignment_dir=self.distillation_alignment_dir,
-                    filter_path=self.distillation_filter_path,
-                    max_template_hits=self.config.train.max_template_hits,
-                    treat_pdb_as_distillation=True,
+            if self.simple is True:
+                train_dataset = simple_modules.PDBSimpleSingleDataset(
+                    chain_index_path=self.chain_index_path_train,
+                    data_dir=self.train_data_dir,
+                    config=self.config,
+                    chain_data_cache_path=self.train_chain_data_cache_path,
+                    filter_path=self.train_filter_path,
                     mode="train",
-                    alignment_index=self.distillation_alignment_index,
-                    _structure_index=self._distillation_structure_index,
+                )
+                if isinstance(self.distillation_data_dir, str):
+                    distillation_dataset = self.make_distillation_simple_dataset(
+                        data_dir=self.distillation_data_dir,
+                        chain_data_cache_path=self.distillation_chain_data_cache_path,
+                    )
+                    d_prob = self.config.train.distillation_prob
+                    datasets = [train_dataset, distillation_dataset]
+                    d_prob = self.config.train.distillation_prob
+                    probabilities = [1.0 - d_prob, d_prob]
+                elif isinstance(self.distillation_data_dir, list):
+                    assert isinstance(self.distillation_alignment_dir, list)
+                    assert isinstance(self.config.train.distillation_prob, list)
+                    assert (
+                        len(self.distillation_data_dir)
+                        == len(self.distillation_alignment_dir)
+                        == len(self.config.train.distillation_prob)
+                    )
+                    distil_datasets = [
+                        self.make_distillation_simple_dataset(
+                            data_dir=d,
+                            chain_data_cache_path=c,
+                        )
+                        for d, c in zip(
+                            self.distillation_data_dir,
+                            self.distillation_chain_data_cache_path,
+                        )
+                    ]
+                    datasets = [train_dataset, *distil_datasets]
+                    probabilities = [
+                        1.0 - sum(self.config.train.distillation_prob),
+                        *self.config.train.distillation_prob,
+                    ]
+                else:
+                    datasets = [train_dataset]
+                    probabilities = [1.0]
+
+            else:
+                train_dataset = dataset_gen(
+                    data_dir=self.train_data_dir,
+                    chain_data_cache_path=self.train_chain_data_cache_path,
+                    alignment_dir=self.train_alignment_dir,
+                    filter_path=self.train_filter_path,
+                    max_template_hits=self.config.train.max_template_hits,
+                    shuffle_top_k_prefiltered=self.config.train.shuffle_top_k_prefiltered,
+                    treat_pdb_as_distillation=False,
+                    mode="train",
+                    alignment_index=self.alignment_index,
                 )
 
-                d_prob = self.config.train.distillation_prob
+                if self.distillation_data_dir is not None:
+                    distillation_dataset = dataset_gen(
+                        data_dir=self.distillation_data_dir,
+                        chain_data_cache_path=self.distillation_chain_data_cache_path,
+                        alignment_dir=self.distillation_alignment_dir,
+                        filter_path=self.distillation_filter_path,
+                        max_template_hits=self.config.train.max_template_hits,
+                        treat_pdb_as_distillation=True,
+                        mode="train",
+                        alignment_index=self.distillation_alignment_index,
+                        _structure_index=self._distillation_structure_index,
+                    )
 
-            if distillation_dataset is not None:
-                datasets = [train_dataset, distillation_dataset]
-                d_prob = self.config.train.distillation_prob
-                probabilities = [1.0 - d_prob, d_prob]
-            else:
-                datasets = [train_dataset]
-                probabilities = [1.0]
+                    d_prob = self.config.train.distillation_prob
+                    datasets = [train_dataset, distillation_dataset]
+                    d_prob = self.config.train.distillation_prob
+                    probabilities = [1.0 - d_prob, d_prob]
+                else:
+                    datasets = [train_dataset]
+                    probabilities = [1.0]
 
             generator = None
             if self.batch_seed is not None:
@@ -702,15 +771,26 @@ class OpenFoldDataModule(pl.LightningDataModule):
             )
 
             if self.val_data_dir is not None:
-                self.eval_dataset = dataset_gen(
-                    data_dir=self.val_data_dir,
-                    alignment_dir=self.val_alignment_dir,
-                    filter_path=None,
-                    max_template_hits=self.config.eval.max_template_hits,
-                    mode="eval",
-                )
+                if self.simple is True:
+                    self.eval_dataset = simple_modules.PDBSimpleSingleDataset(
+                        chain_index_path=self.chain_index_path_val,
+                        data_dir=self.val_data_dir,
+                        config=self.config,
+                        chain_data_cache_path=None,
+                        filter_path=None,
+                        mode="eval",
+                    )
+                else:
+                    self.eval_dataset = dataset_gen(
+                        data_dir=self.val_data_dir,
+                        alignment_dir=self.val_alignment_dir,
+                        filter_path=None,
+                        max_template_hits=self.config.eval.max_template_hits,
+                        mode="eval",
+                    )
             else:
                 self.eval_dataset = None
+
         else:
             self.predict_dataset = dataset_gen(
                 data_dir=self.predict_data_dir,

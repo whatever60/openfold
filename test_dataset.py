@@ -4,7 +4,7 @@ import json
 import ml_collections as mlc
 
 from openfold.data.data_modules import OpenFoldSingleDataset
-from openfold.data.baseline_modules import SimpleDataset
+from openfold.data.simple_modules import SimpleDataset
 from test_datamodule import args, update_config
 
 
