@@ -28,7 +28,6 @@ from openfold.data.data_pipeline import (
 )
 from openfold.data.feature_pipeline import make_data_config, np_to_tensor_dict
 from openfold.data.input_pipeline import nonensembled_transform_fns, compose
-from openfold.data.simple_modules import empty_msa_feats
 from openfold.utils.rigid_utils import Rotation, Rigid
 from openfold.utils.feats import (
     frames_and_literature_positions_to_atom14_pos,
@@ -1066,7 +1065,7 @@ class AtlasSimpleSingleDataset(torch.utils.data.Dataset):
 
     @staticmethod
     def make_decoy_pdb_compact(
-        pdb_path: str, config: dict, return_internal: bool = False
+        pdb_path: str, return_internal: bool = False
     ) -> Dict[str, np.ndarray]:
         with open(pdb_path) as f:
             protein_object = protein.from_pdb_string(f.read())
@@ -1087,19 +1086,47 @@ class AtlasSimpleSingleDataset(torch.utils.data.Dataset):
         pdb_feats.update(empty_template_feats(len(sequence)))
         pdb_feats.update(empty_msa_feats(sequence))
 
+        dummy_feature_names = [
+            "aatype",
+            "residue_index",
+            "msa",
+            "num_alignments",
+            "seq_length",
+            "between_segment_residues",
+            "deletion_matrix",
+            "no_recycling_iters",
+            # no template
+            "all_atom_mask",
+            "all_atom_positions",
+            "resolution",
+            "use_clamped_fape",
+            "is_distillation",
+        ]
+        dummy_config = mlc.ConfigDict(
+            {
+                "common": {"use_templates": False},
+                "train": {"crop_size": num_res, "supervised": True},
+            }
+        )
         # high_confidence = protein_object.b_factors > confidence_threshold
-        cfg, feature_names = make_data_config(config, mode="train", num_res=num_res)
-        tensor_dict = np_to_tensor_dict(np_example=pdb_feats, features=feature_names)
+        # cfg, feature_names = make_data_config(dummy_config, mode="train", num_res=num_res)
+        tensor_dict = np_to_tensor_dict(
+            np_example=pdb_feats, features=dummy_feature_names
+        )
         with torch.no_grad():
             # features = process_tensors_from_config()
             nonensembled = nonensembled_transform_fns(
-                common_cfg=cfg["common"], mode_cfg=cfg["train"]
+                common_cfg=dummy_config["common"], mode_cfg=dummy_config["train"]
             )
             tensor_dict = compose(nonensembled)(tensor_dict)
         # now let's apply some assertions to make sure that decoy structure is indeed as simple as we thought.
-        assert tensor_dict["seq_length"] == num_res
-        assert (tensor_dict["residue_index"].numpy() == np.arange(num_res)).all()
-        assert (tensor_dict["between_segment_residues"] == 0).all()
+        assert tensor_dict["seq_length"] == num_res, "sequence length not matched"
+        assert (
+            tensor_dict["residue_index"].numpy() == np.arange(num_res)
+        ).all(), "residue index not trivial"
+        assert (
+            tensor_dict["between_segment_residues"] == 0
+        ).all(), "between segment residues not trivial"
 
         torsion_sin, torsion_cos = (
             tensor_dict["torsion_angles_sin_cos"][:, 2:].permute(2, 0, 1).numpy()

@@ -1,12 +1,21 @@
 {
     "data": {
         "train": {
-            "crop_size": 384
+            "crop_size": 384,
+            "max_msa_clusters": 512
         }
     },
     "model": {
         "template": {
             "enabled": false
+        }
+    },
+    "loss": {
+        "violation": {
+            "weight": 1.0
+        },
+        "experimentally_resolved": {
+            "weight": 0.01
         }
     }
 }

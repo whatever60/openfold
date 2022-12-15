@@ -9,13 +9,21 @@
         },
         "common": {
             "reduce_max_clusters_by_max_templates": true,
-            "use_template": true,
+            "use_templates": true,
             "use_template_torsion_angles": true
         }
     },
     "model": {
         "template": {
             "enabled": true
+        }
+    },
+    "loss": {
+        "violation": {
+            "weight": 1.0
+        },
+        "experimentally_resolved": {
+            "weight": 0.01
         }
     }
 }

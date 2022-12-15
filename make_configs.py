@@ -29,7 +29,7 @@ if __name__ == "__main__":
                 },
             },
             f,
-            indent=4
+            indent=4,
         )
 
     with open(f"{config_dir}/finetuning_no_templ.json", "w") as f:
@@ -50,7 +50,7 @@ if __name__ == "__main__":
                 "model": {"template": {"enabled": False}},
             },
             f,
-            indent=4
+            indent=4,
         )
 
     with open(f"{config_dir}/model_1.1.json", "w") as f:
@@ -67,7 +67,7 @@ if __name__ == "__main__":
                 },
             },
             f,
-            indent=4
+            indent=4,
         )
     with open(f"{config_dir}/model_1.2.json", "w") as f:
         # same as 1.1 but no template
@@ -85,7 +85,7 @@ if __name__ == "__main__":
                 "model": {"template": {"enabled": False}},
             },
             f,
-            indent=4
+            indent=4,
         )
 
     with open(f"{config_dir}/model_1.1.1.json", "w") as f:
@@ -96,14 +96,18 @@ if __name__ == "__main__":
                     "predict": {"max_extra_msa": 5120},
                     "common": {
                         "reduce_max_clusters_by_max_templates": True,
-                        "use_template": True,
+                        "use_templates": True,
                         "use_template_torsion_angles": True,
                     },
                 },
                 "model": {"template": {"enabled": True}},
+                "loss": {
+                    "violation": {"weight": 1.0},
+                    "experimentally_resolved": {"weight": 0.01},
+                },
             },
             f,
-            indent=4
+            indent=4,
         )
 
     with open(f"{config_dir}/model_1.1.2.json", "w") as f:
@@ -111,17 +115,24 @@ if __name__ == "__main__":
         json.dump(
             {
                 "data": {
-                    "train": {"crop_size": 384},
+                    "train": {
+                        "crop_size": 384,
+                        "max_msa_clusters": 512,
+                    },
                     "common": {
                         "reduce_max_clusters_by_max_templates": True,
-                        "use_template": True,
+                        "use_templates": True,
                         "use_template_torsion_angles": True,
                     },
                 },
                 "model": {"template": {"enabled": True}},
+                "loss": {
+                    "violation": {"weight": 1.0},
+                    "experimentally_resolved": {"weight": 0.01},
+                },
             },
             f,
-            indent=4
+            indent=4,
         )
 
     with open(f"{config_dir}/model_1.2.1.json", "w") as f:
@@ -129,13 +140,21 @@ if __name__ == "__main__":
         json.dump(
             {
                 "data": {
-                    "train": {"crop_size": 384, "max_extra_msa": 5120},
+                    "train": {
+                        "crop_size": 384,
+                        "max_msa_clusters": 512,
+                        "max_extra_msa": 5120,
+                    },
                     "predict": {"max_extra_msa": 5120},
                 },
                 "model": {"template": {"enabled": False}},
+                "loss": {
+                    "violation": {"weight": 1.0},
+                    "experimentally_resolved": {"weight": 0.01},
+                },
             },
             f,
-            indent=4
+            indent=4,
         )
 
     with open(f"{config_dir}/model_1.2.2.json", "w") as f:
@@ -143,24 +162,36 @@ if __name__ == "__main__":
         json.dump(
             {
                 "data": {
-                    "train": {"crop_size": 384, "max_extra_msa": 5120},
+                    "train": {
+                        "crop_size": 384,
+                        "max_msa_clusters": 512,
+                        "max_extra_msa": 5120,
+                    },
                     "predict": {"max_extra_msa": 5120},
                 },
                 "model": {"template": {"enabled": False}},
+                "loss": {
+                    "violation": {"weight": 1.0},
+                    "experimentally_resolved": {"weight": 0.01},
+                },
             },
             f,
-            indent=4
+            indent=4,
         )
 
     with open(f"{config_dir}/model_1.2.3.json", "w") as f:
         # same as 1.2.2 but less extra seq
         json.dump(
             {
-                "data": {"train": {"crop_size": 384}},
+                "data": {"train": {"crop_size": 384, "max_msa_clusters": 512}},
                 "model": {"template": {"enabled": False}},
+                "loss": {
+                    "violation": {"weight": 1.0},
+                    "experimentally_resolved": {"weight": 0.01},
+                },
             },
             f,
-            indent=4
+            indent=4,
         )
 
     with open(f"{config_dir}/ptm.json", "w") as f:
@@ -170,7 +201,7 @@ if __name__ == "__main__":
                 "model": {"heads": {"tm": {"enabled": True}}},
             },
             f,
-            indent=4
+            indent=4,
         )
 
     with open(f"{config_dir}/inference_long_seq.json", "w") as f:
@@ -191,7 +222,7 @@ if __name__ == "__main__":
                 },
             },
             f,
-            indent=4
+            indent=4,
         )
 
     with open(f"{config_dir}/train.json", "w") as f:
@@ -208,7 +239,7 @@ if __name__ == "__main__":
                 },
             },
             f,
-            indent=4
+            indent=4,
         )
 
     with open(f"{config_dir}/low_prec.json", "w") as f:
@@ -229,5 +260,5 @@ if __name__ == "__main__":
                 },
             },
             f,
-            indent=4
+            indent=4,
         )
