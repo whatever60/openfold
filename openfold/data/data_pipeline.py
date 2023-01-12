@@ -477,6 +477,7 @@ class DataPipeline:
     ):
         self.template_featurizer = template_featurizer
 
+    # @staticmethod
     def _parse_msa_data(
         self,
         alignment_dir: str,
@@ -566,6 +567,7 @@ class DataPipeline:
         input_sequence: Optional[str] = None,
         alignment_index: Optional[str] = None,
     ):
+        # not responsible for deduplicating
         msa_data = self._parse_msa_data(alignment_dir, alignment_index)
         if len(msa_data) == 0:
             if input_sequence is None:

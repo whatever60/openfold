@@ -697,11 +697,11 @@ class OpenFoldDataModule(pl.LightningDataModule):
                     d_prob = self.config.train.distillation_prob
                     probabilities = [1.0 - d_prob, d_prob]
                 elif isinstance(self.distillation_data_dir, list):
-                    assert isinstance(self.distillation_alignment_dir, list)
+                    assert isinstance(self.distillation_chain_data_cache_path, list)
                     assert isinstance(self.config.train.distillation_prob, list)
                     assert (
                         len(self.distillation_data_dir)
-                        == len(self.distillation_alignment_dir)
+                        == len(self.distillation_chain_data_cache_path)
                         == len(self.config.train.distillation_prob)
                     )
                     distil_datasets = [

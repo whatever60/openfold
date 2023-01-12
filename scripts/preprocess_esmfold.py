@@ -141,6 +141,70 @@ def preprocess_chunk(base_dir: str, url: str) -> None:
     subprocess.run(["rm", "-rf", f"{base_dir}/{file_name}/raw"])
 
 
+def preprocess_collection_simple(base_dir: str, collection: str, save_dir: str) -> None:
+    protein_ids = [
+        i.split(".")[0]
+        for i in os.listdir(f"{base_dir}/{collection}")
+        if i.endswith(".pdb")
+    ]
+
+    # if parallelize:
+    #     Parallel(n_jobs=32)(
+    #         delayed(preprocess_pdb)(f"{base_dir}/raw/{collection}", i) for i in tqdm(protein_ids)
+    #     )
+    # else:
+
+    os.makedirs(f"{save_dir}/{collection}", exist_ok=True)
+
+    for protein_id in tqdm(protein_ids):
+        preprocess_pdb_simple(base_dir, collection, protein_id, save_dir)
+
+
+def preprocess_pdb_simple(
+    base_dir: str, collection: str, protein_id: str, save_dir: str
+) -> None:
+    try:
+        res, internal = AtlasSimpleSingleDataset.make_decoy_pdb_compact(
+            f"{base_dir}/{collection}/{protein_id}.pdb", return_internal=True
+        )
+    except (AssertionError, ValueError) as e:
+        logging.warning(f"Error {e} for {collection}/{protein_id}.pdb")
+        return
+
+    np.savez_compressed(f"{save_dir}/{collection}/{protein_id}.npz", **res)
+    res = AtlasSimpleSingleDataset.make_decoy_compact_openfold(
+        f"{save_dir}/{collection}/{protein_id}.npz", confidence_threshold=0.5
+    )
+
+    for k in res:
+        if k in internal:
+            assert internal[k].dtype == res[k].dtype
+            assert internal[k].shape == res[k].shape
+            if k == "all_atom_mask":
+                pass
+            elif k == "all_atom_positions":
+                pass
+                # progress_bar.set_postfix(
+                #     {"acc loss": f"{np.abs(internal[k] - res[k]).max():.3f}"}
+                # )
+            else:
+                # if not (internal[k] == res[k]).all():
+                #     import pdb; pdb.set_trace()
+                # assert (internal[k] == res[k]).all(), [
+                #     k,
+                #     internal[k],
+                #     res[k],
+                # ]
+                if not (internal[k] == res[k]).all():
+                    logging.warning(
+                        f"Conversion back to OpenFold is incorrect for {base_dir}/{protein_id}.pdb",
+                        k,
+                        internal[k],
+                        res[k],
+                    )
+                    break
+
+
 if __name__ == "__main__":
     log_file = "./preprocess_esmfold_atlas_log.txt"
     logging.basicConfig(filename=log_file)
@@ -168,15 +232,35 @@ if __name__ == "__main__":
     # with open(f"configs/train.json") as f:
     #     config = update_config(config, json.load(f))
 
-    urls = [i.strip() for i in requests.get(esmfold_atlas_url).text.splitlines()]
+    # urls = [i.strip() for i in requests.get(esmfold_atlas_url).text.splitlines()]
+    # if parallelize:
+    #     Parallel(n_jobs=1)(
+    #         delayed(preprocess_chunk)(f"{data_dir}/{atlas_name}_atlas", i)
+    #         for i in tqdm(urls)
+    #     )
+    # else:
+    #     for url in tqdm(urls):
+    #         preprocess_chunk(f"{data_dir}/{atlas_name}_atlas", url)
+
+    esmfold_raw_dir = "/scratch/00946/zzhang/data/esmfold"
+    save_dir = "/scratch/09101/whatever/data/esmfold_atlas"
+    collections = [
+        i
+        for i in sorted(os.listdir(esmfold_raw_dir))
+        if os.path.isdir(f"{esmfold_raw_dir}/{i}")
+    ]
     if parallelize:
-        Parallel(n_jobs=1)(
-            delayed(preprocess_chunk)(f"{data_dir}/{atlas_name}_atlas", i)
-            for i in tqdm(urls)
+        n_jobs = 96
+        chunk_id = 10
+        Parallel(n_jobs=n_jobs)(
+            delayed(preprocess_collection_simple)(esmfold_raw_dir, collection, save_dir)
+            for collection in tqdm(
+                collections[n_jobs * chunk_id : n_jobs * (chunk_id + 1)]
+            )
         )
     else:
-        for url in tqdm(urls):
-            preprocess_chunk(f"{data_dir}/{atlas_name}_atlas", url)
+        for collection in tqdm(collections):
+            preprocess_collection_simple(esmfold_raw_dir, collection, save_dir)
 
     # res_prot = protein.Protein(
     #     atom_positions=res["all_atom_positions"],

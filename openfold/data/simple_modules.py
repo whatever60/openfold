@@ -1129,7 +1129,11 @@ class AtlasSimpleSingleDataset(torch.utils.data.Dataset):
         ).all(), "between segment residues not trivial"
 
         torsion_sin, torsion_cos = (
-            tensor_dict["torsion_angles_sin_cos"][:, 2:].permute(2, 0, 1).numpy()
+            tensor_dict["torsion_angles_sin_cos"][:, 2:]
+            .permute(2, 0, 1)
+            # don't know why, but seems sometimes the value is out of this range and you get RuntimeWarning: invalid value encountered in arccos
+            .clip(-1, 1)
+            .numpy()
         )
         a_acos = np.arccos(torsion_cos)
         angle = np.degrees(a_acos)
