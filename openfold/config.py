@@ -174,6 +174,10 @@ def model_config(
         # c.data.common.no_msa = True
         # c.data.common.no_templ = False
         # c.data.common.msa_cluster_features = False
+    elif name == "baseline_esmfold":
+        c.model.extra_msa.enabled = False
+        c.model.template.enabled = False
+        c.loss.masked_msa.weight = 0.0
     else:
         raise ValueError("Invalid model name")
 
@@ -377,6 +381,7 @@ config = mlc.ConfigDict(
                 "max_distillation_msa_clusters": 1000,
                 "uniform_recycling": True,
                 "distillation_prob": 0.75,
+                "distillation_prob_esmfold_atlas": 0.75,
             },
             "data_module": {
                 "use_small_bfd": False,

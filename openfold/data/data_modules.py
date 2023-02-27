@@ -283,6 +283,11 @@ class OpenFoldSingleDataset(torch.utils.data.Dataset):
             dtype=torch.int64,
             device=feats["aatype"].device,
         )
+        feats["name"] = torch.tensor(
+            [[ord(i) for i in name] for _ in range(feats["aatype"].shape[-1])],
+            dtype=torch.uint8,
+            device=feats["aatype"].device,
+        ).t()
 
         return feats
 
@@ -585,6 +590,8 @@ class OpenFoldDataModule(pl.LightningDataModule):
         chain_index_path_train: Optional[str] = None,
         chain_index_path_distillation: Optional[str] = None,
         chain_index_path_val: Optional[str] = None,
+        # ESMFold Atlas
+        distillation_data_dir_esmfold_atlas: Optional[str] = None,
         **kwargs,
     ):
         super(OpenFoldDataModule, self).__init__()
@@ -613,6 +620,8 @@ class OpenFoldDataModule(pl.LightningDataModule):
         self.chain_index_path_train = chain_index_path_train
         self.chain_index_path_distillation = chain_index_path_distillation
         self.chain_index_path_val = chain_index_path_val
+        # ESMFold Atlas
+        self.distillation_data_dir_esmfold_atlas = distillation_data_dir_esmfold_atlas
 
         if self.train_data_dir is None and self.predict_data_dir is None:
             raise ValueError(
@@ -654,13 +663,15 @@ class OpenFoldDataModule(pl.LightningDataModule):
                 self.distillation_alignment_index = json.load(fp)
 
     @staticmethod
-    def make_distillation_simple_dataset(data_dir: str, chain_data_cache_path: str):
-        if "alphafold" in data_dir or "esmfold" in data_dir:
+    def make_distillation_simple_dataset(
+        data_dir: str, chain_data_cache_path: str, which: str
+    ):
+        if which == "alphafold" or which == "esmfold":
             dataset = simple_modules.AtlasSimpleSingleDataset
-        elif "openfold" in data_dir:
+        elif which == "openfold":
             dataset = simple_modules.OpenFoldSimpleSingleDataset
         else:
-            raise ValueError()
+            raise NotImplementedError
         return dataset(
             data_dir=data_dir, chain_data_cache_path=chain_data_cache_path, mode="train"
         )
@@ -687,38 +698,51 @@ class OpenFoldDataModule(pl.LightningDataModule):
                     filter_path=self.train_filter_path,
                     mode="train",
                 )
+                datasets = [train_dataset]
+                probabilities = [1.0]
                 if isinstance(self.distillation_data_dir, str):
                     distillation_dataset = self.make_distillation_simple_dataset(
                         data_dir=self.distillation_data_dir,
                         chain_data_cache_path=self.distillation_chain_data_cache_path,
+                        which="openfold",
                     )
+                    datasets.append(distillation_dataset)
                     d_prob = self.config.train.distillation_prob
-                    datasets = [train_dataset, distillation_dataset]
-                    d_prob = self.config.train.distillation_prob
-                    probabilities = [1.0 - d_prob, d_prob]
-                elif isinstance(self.distillation_data_dir, list):
-                    assert isinstance(self.distillation_chain_data_cache_path, list)
-                    assert isinstance(self.config.train.distillation_prob, list)
-                    assert (
-                        len(self.distillation_data_dir)
-                        == len(self.distillation_chain_data_cache_path)
-                        == len(self.config.train.distillation_prob)
+                    probabilities[0] -= d_prob
+                    probabilities.append(d_prob)
+                if isinstance(self.distillation_data_dir_esmfold_atlas, str):
+                    distil_dataset = self.make_distillation_simple_dataset(
+                        data_dir=self.distillation_data_dir_esmfold_atlas,
+                        chain_data_cache_path=None,
+                        which="esmfold",
                     )
-                    distil_datasets = [
-                        self.make_distillation_simple_dataset(
-                            data_dir=d,
-                            chain_data_cache_path=c,
-                        )
-                        for d, c in zip(
-                            self.distillation_data_dir,
-                            self.distillation_chain_data_cache_path,
-                        )
-                    ]
-                    datasets = [train_dataset, *distil_datasets]
-                    probabilities = [
-                        1.0 - sum(self.config.train.distillation_prob),
-                        *self.config.train.distillation_prob,
-                    ]
+                    datasets.append(distil_dataset)
+                    d_prob = self.config.train.distillation_prob_esmfold_atlas
+                    probabilities[0] -= d_prob
+                    probabilities.append(d_prob)
+                # elif isinstance(self.distillation_data_dir, list):
+                #     assert isinstance(self.distillation_chain_data_cache_path, list)
+                #     assert isinstance(self.config.train.distillation_prob, list)
+                #     assert (
+                #         len(self.distillation_data_dir)
+                #         == len(self.distillation_chain_data_cache_path)
+                #         == len(self.config.train.distillation_prob)
+                #     )
+                #     distil_datasets = [
+                #         self.make_distillation_simple_dataset(
+                #             data_dir=d,
+                #             chain_data_cache_path=c,
+                #         )
+                #         for d, c in zip(
+                #             self.distillation_data_dir,
+                #             self.distillation_chain_data_cache_path,
+                #         )
+                #     ]
+                #     datasets = [train_dataset, *distil_datasets]
+                #     probabilities = [
+                #         1.0 - sum(self.config.train.distillation_prob),
+                #         *self.config.train.distillation_prob,
+                #     ]
                 else:
                     datasets = [train_dataset]
                     probabilities = [1.0]

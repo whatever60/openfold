@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from typing import Dict, Tuple, List
+from ast import literal_eval
 
 # from cdifflib import CSequenceMatcher as SequenceMatcher
 import tempfile
@@ -11,8 +12,9 @@ sys.path = ["/work/09101/whatever/openfold"] + sys.path
 
 import numpy as np
 import pandas as pd
-import pymol
+from pymol import cmd
 import matplotlib.pyplot as plt
+from adjustText import adjust_text
 import seaborn as sns
 from tqdm.auto import tqdm
 
@@ -20,34 +22,42 @@ from openfold.data import templates, parsers, mmcif_parsing
 from openfold.data.data_pipeline import _aatype_to_str_sequence
 
 
-def cal_sec_struc_content(val_set_dir) -> Tuple[List[float], List[float]]:
+def cal_sec_struc_content(
+    val_set_dir, val_alignment_dir
+) -> Tuple[List[float], List[float]]:
     """
     From ChatGPT
     """
-    val_cifs = [i for i in sorted(os.listdir(val_set_dir)) if i.endswith(".cif")]
+    id_chains = [
+        i.split("_")
+        for i in sorted(os.listdir(val_alignment_dir))
+        if os.path.isdir(f"{val_alignment_dir}/{i}")
+    ]
     # pymol.finish_launching()
 
-    def cal_sec_struc_pymol(structure_path):
+    def cal_sec_struc_pymol(structure_path: str, chain: str):
         # Close PyMOL
-        pymol.cmd.reinitialize()
+        cmd.reinitialize()
 
         # Load the mmCIF file into PyMOL
-        pymol.cmd.load(structure_path, "protein")
+        cmd.load(structure_path, "prot")
+
+        cmd.remove(f"not (chain {chain})")
 
         # Select all alpha helices in the protein structure
-        pymol.cmd.select("alpha_helices", "ss h")
+        cmd.select("alpha_helices", "ss h")
 
         # Calculate the number of alpha helices in the protein
-        num_alpha_helices = pymol.cmd.count_atoms("alpha_helices")
+        num_alpha_helices = cmd.count_atoms("alpha_helices")
 
         # Select all beta sheets in the protein structure
-        pymol.cmd.select("beta_sheets", "ss s")
+        cmd.select("beta_sheets", "ss s")
 
         # Calculate the number of beta sheets in the protein
-        num_beta_sheets = pymol.cmd.count_atoms("beta_sheets")
+        num_beta_sheets = cmd.count_atoms("beta_sheets")
 
         # Calculate the total number of amino acids in the protein
-        num_amino_acids = pymol.cmd.count_atoms("polymer")
+        num_amino_acids = cmd.count_atoms("polymer")
 
         # Calculate the percentage of amino acids that are alpha helices
         percent_alpha_helices = (num_alpha_helices / num_amino_acids) * 100
@@ -57,7 +67,10 @@ def cal_sec_struc_content(val_set_dir) -> Tuple[List[float], List[float]]:
         return percent_alpha_helices, percent_beta_sheets
 
     percents_a, percents_b = zip(
-        *[cal_sec_struc_pymol(f"{val_set_dir}/{cif}") for cif in val_cifs]
+        *[
+            cal_sec_struc_pymol(f"{val_set_dir}/{id_}.cif", chain)
+            for id_, chain in id_chains
+        ]
     )
 
     return np.array(percents_a), np.array(percents_b)
@@ -82,6 +95,10 @@ def similarity_matrix(sequences):
 
 
 def calc_neff(alignment_dir: str) -> float:
+    """Calculate effective MSA depth for all proteins in the alignment dir with HMMBuild.
+    Do special processing for problematic alignments.
+    Only performed for CAEMO validation set.
+    """
     with open(f"{alignment_dir}/bfd_uniclust_hits.a3m") as f1, open(
         f"{alignment_dir}/mgnify_hits.a3m"
     ) as f2, open(f"{alignment_dir}/uniref90_hits.a3m") as f3:
@@ -184,6 +201,18 @@ def plot_plddt_lddt(
     # load model log dataframe
     df_log = pd.read_pickle(log_path)
 
+    df_log["seq"] = df_log.sequence.map(_aatype_to_str_sequence)
+
+    # count similar sequences
+    nums = []
+    df_seq = pd.read_csv(seq_sim_path, header=None, sep="\t")
+    for i in range(df_log.shape[0]):
+        row = df_seq[df_seq[1] == f"cameo_{i}"]
+        assert row.shape[0] == 1
+        rep = row[0].to_list()[0]
+        nums.append((df_seq[0] == rep).sum())
+    df_log["log_num_similar_sequences"] = np.log10(np.array(nums) + 1)
+
     # calculate additional properties of proteins in validation set
     protein_ids = [
         i
@@ -191,6 +220,9 @@ def plot_plddt_lddt(
         if os.path.isdir(f"{val_alignment_dir}/{i}")
     ]
     print(protein_ids)
+
+    # secondary structure components
+    percents_a, percents_b = cal_sec_struc_content(val_set_dir, val_alignment_dir)
 
     # get protein sequence in string format and number of msa sequences
     res = [
@@ -200,13 +232,10 @@ def plot_plddt_lddt(
     _, num_msas, seqs = map(np.array, zip(*res))
 
     # N_effective
-    # neffs = [
-    #     calc_neff(f"{val_alignment_dir}/{protein_id}")
-    #     for protein_id in tqdm(protein_ids)
-    # ]
-
-    # secondary structure components
-    percents_a, percents_b = cal_sec_struc_content(val_set_dir)
+    neffs = [
+        calc_neff(f"{val_alignment_dir}/{protein_id}")
+        for protein_id in tqdm(protein_ids)
+    ]
 
     # structure similarity
     df_str = pd.read_csv(str_sim_path, header=None, sep="\t")
@@ -225,17 +254,17 @@ def plot_plddt_lddt(
             name=protein_ids,
             seq=seqs,
             num_msa=num_msas,
-            log_num_msa=np.log10(num_msas+1),
-            # Neff=neffs,
-            # log_Neff=np.log1p(neffs),
+            log_num_msa=np.log10(num_msas + 1),
+            Neff=neffs,
+            log_Neff=np.log1p(neffs),
             percent_α_helix=percents_a,
             percent_β_sheet=percents_b,
-            log_num_similar_structures=np.log10(np.array(nums)+1),
+            log_num_similar_structures=np.log10(np.array(nums) + 1),
         )
     )
     df_addi = df_addi.sort_values("seq")
 
-    df_log["seq"] = df_log.sequence.map(_aatype_to_str_sequence)
+    # sort based on amino acid sequence
     df_log = df_log.sort_values("seq")
     assert (df_log.seq.to_numpy() == df_addi.seq.to_numpy()).all()
     df_log = df_log.drop(columns=["seq"]).join(df_addi)
@@ -247,9 +276,6 @@ def plot_plddt_lddt(
     df_log["mean_lddt"] = lddt_ca.map(np.mean)
     df_log["mean_drmsd_ca"] = drmsd_ca.map(np.mean)
     df_log["mean_plddt"] = df_log["plddt"].map(np.mean)
-    df_log["log_num_similar_sequences"] = (
-        np.log10(pd.read_csv(seq_sim_path, header=None).squeeze().to_numpy() + 1)
-    )
     df_log["violation_loss"] = df_log.loss.map(lambda x: x["violation"])
 
     model_name = log_path.split("/")[-1].split(".")[0]
@@ -310,9 +336,135 @@ def plot_plddt_lddt(
     plt.clf()
 
     # lDDT_Cα vs. number of similar structures
-    sns.jointplot(data=df_log, x="log_num_similar_structures", y="mean_lddt", kind="reg")
+    sns.jointplot(
+        data=df_log, x="log_num_similar_structures", y="mean_lddt", kind="reg"
+    )
     plt.savefig(f"{fig_dir}/{model_name}_lddt_simstr.jpg")
     plt.clf()
+
+
+def scatter_plot(x, y, names, hue, x_label, y_label, save_path) -> None:
+    fig, ax = plt.subplots(figsize=(10, 10))
+    sns.regplot(x=x, y=y, ax=ax, alpha=0, ax=ax)
+    sns.scatterplot(x=x, y=y, hue=hue, alpha=0.5, ax=ax)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+
+    text_axs = []
+    for idx, name in enumerate(names):
+        # Only append selected countries
+        xi, yi = x[idx], y[idx]
+        text_axs.append(ax.text(xi, yi, name, fontsize=12))
+    adjust_text(
+        text_axs, expand_points=(3, 3), arrowprops=dict(arrowstyle="-", lw=1), ax=ax
+    )
+    fig.savefig(save_path, dpi=150)
+
+
+def analysis_casp15(pred_path: str, metrics_path: str, fig_dir):
+    # sequence, loss, plddt, ptm, ... are here
+    df_pred = pd.read_csv(pred_path, index_col="name")
+    df_pred["plddt"] = df_pred.plddt.apply(literal_eval)
+    df_pred["sequence"] = df_pred.sequence.apply(literal_eval)
+    df_pred["loss"] = df_pred.loss.apply(literal_eval)
+
+    df_pred["mean_plddt"] = df_pred.plddt.map(np.mean)
+
+    # metrics, domain, residue_index are here
+    df_metrics = pd.read_csv(metrics_path)  
+    df_metrics["plddt"] = [
+        np.array(df_pred.loc[r.name].plddt)[r.residue_index]
+        for r in df_metrics.itertuples()
+    ]
+    df_metrics["length"] = [
+        len(df_pred.loc[r.name].sequence) for r in df_metrics.itertuples()
+    ]
+
+    df_metrics["mean_plddt"] = df_metrics.plddt.map(np.mean)
+    df_metrics["mean_drmsd_ca"] = df_metrics.drmsd_ca.map(np.mean)
+
+    # remove all whole proteins
+    df_metrics = df_metrics[df_metrics.category != ""]
+
+    # There are currently missing for CASP15.
+    # lDDT_Cα vs. violation loss
+    # lDDT_Cα vs. log(Neff)
+    # lDDT_Cα vs. Neff
+    # lDDT_Cα vs. log(num_msa)
+    # lDDT_Cα vs. num_msa
+    # lDDT_Cα vs. number of similar sequences
+    # lDDT_Cα vs. number of similar structures
+
+    # lDDT_Cα vs. plddt
+    scatter_plot(
+        df_metrics.mean_plddt,
+        df_metrics.lddt_ca,
+        df_metrics.domain,
+        df_metrics.category,
+        "Mean plDDT",
+        "lDDT_Cα",
+        f"{fig_dir}/lddt_plddt.jpg",
+    )
+    # lDDT_Cα vs. dRMSD_Cα
+    scatter_plot(
+        df_metrics.mean_drmsd_ca,
+        df_metrics.lddt_ca,
+        df_metrics.domain,
+        df_metrics.category,
+        "Mean dRMSD_Cα",
+        "lDDT_Cα",
+        f"{fig_dir}/lddt_drmsd.jpg",
+    )
+    # lDDT_Cα vs. protein length (of full protein)
+    scatter_plot(
+        df_metrics.length,
+        df_metrics.lddt_ca,
+        df_metrics.domain,
+        df_metrics.category,
+        "Length (of full protein)",
+        "lDDT_Cα",
+        f"{fig_dir}/lddt_length.jpg",
+    )
+    # lDDT_Cα vs. α helix percentage (of the fragment)
+    scatter_plot(
+        df_metrics.a,
+        df_metrics.lddt_ca,
+        df_metrics.domain,
+        df_metrics.category,
+        "% α helix composition",
+        "lDDT_Cα",
+        f"{fig_dir}/lddt_a.jpg",
+    )
+    # lDDT_Cα vs. β sheet percentage
+    scatter_plot(
+        df_metrics.b,
+        df_metrics.lddt_ca,
+        df_metrics.domain,
+        df_metrics.category,
+        "% β sheet composition",
+        "lDDT_Cα",
+        f"{fig_dir}/lddt_b.jpg",
+    )
+
+    # time vs. protein length
+    scatter_plot(
+        df_pred.sequence.map(len),
+        df_pred.time,
+        df_pred.name,
+        "Length",
+        "Time",
+        f"{fig_dir}/time_length.jpg",
+    )
+    # lDDT_Cα
+    scatter_plot(
+        np.arange(df_metrics.shape[0]),
+        df_metrics.lddt_ca,
+        df_metrics.domain,
+        df_metrics.category,
+        "",
+        "lDDT_Cα",
+        f"{fig_dir}/lddt.jpg",
+    )
 
 
 if __name__ == "__main__":
@@ -320,13 +472,19 @@ if __name__ == "__main__":
 
     install()
 
-    val_alignment_dir = (
-        "/scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/val_set/alignments"
-    )
-    val_set_dir = "/scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/val_set/data"
+    val_alignment_dir = "/scratch/00946/zzhang/data/openfold/cameo/alignments"
+    val_set_dir = "/scratch/00946/zzhang/data/openfold/cameo/mmcif_files"
 
-    seq_sim_path = "/scratch/09101/whatever/data/similarity/sequence/cluster_size.csv"
+    # cd /scratch/09101/whatever/data/similarity/sequence
+    # mmseqs easy-cluster cameo_pdb.fa clusterRes tmp --min-seq-id 0.5 -c 0.8 --cov-mode 1
+    seq_sim_path = (
+        "/scratch/09101/whatever/data/similarity/sequence/clusterRes_cluster.tsv"
+    )
+
+    # cd /scratch/09101/whatever/data/similarity/structure
+    # foldseek easy-search /scratch/00946/zzhang/data/openfold/cameo/mmcif_files /scratch/00946/zzhang/data/openfold/ls6-tacc/pdb_mmcif/mmcif_files aln.m8 tmpFolder
     str_sim_path = "/scratch/09101/whatever/data/similarity/structure/aln.m8"
+
     cache_path = (
         "/scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/prot_data_cache.json"
     )
@@ -335,4 +493,14 @@ if __name__ == "__main__":
 
     log_dir = "/work/09101/whatever/openfold/val_res"
     model = "of_baseline_53.pkl"
-    plot_plddt_lddt(val_alignment_dir, val_set_dir, f"{log_dir}/{model}", seq_sim_path, str_sim_path, cache_path, log_dir)
+    # plot_plddt_lddt(
+    #     val_alignment_dir,
+    #     val_set_dir,
+    #     f"{log_dir}/{model}",
+    #     seq_sim_path,
+    #     str_sim_path,
+    #     cache_path,
+    #     log_dir,
+    # )
+
+    analysis_casp15()

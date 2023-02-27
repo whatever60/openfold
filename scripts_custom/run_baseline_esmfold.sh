@@ -8,7 +8,7 @@ export CUDA_HOME=/opt/apps/cuda/11.4
 
 # pip3 install rich -q
 
-echo running no msa no template baseline $(date)
+echo running baseline_esmfold $(date)
 
 echo $(nvidia-smi)
 
@@ -19,6 +19,7 @@ python train_openfold.py \
      train_baseline/test \
      2021-10-01 \
      --alignment_index_path /scratch/09101/whatever/data/openfold/alignment_db/duplicated_super_fix.index \
+     --distillation_data_dir_esmfold_atlas /scratch/09101/whatever/data/esmfold_atlas \
      --val_data_dir /scratch/00946/zzhang/data/openfold/cameo/mmcif_files \
      --val_alignment_dir /scratch/09101/whatever/data/openfold/cameo_alignments \
      --template_release_dates_cache_path /scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/mmcif_cache.json \
@@ -33,14 +34,12 @@ python train_openfold.py \
      --wandb \
      --wandb_entity openfold \
      --wandb_project single_sequence_yiming  \
-     --experiment_name no_msa_no_template \
+     --experiment_name baseline_esmfold_test \
      --seed $(date +"%m%d%Y") \
-     --config_preset no_msa_no_template \
+     --config_preset baseline_esmfold \
      --gpus $1 \
      --num_nodes $2 \
-     --resume_from_ckpt train_baseline/test/single_sequence_yiming/3or5efyd/checkpoints/86-304499.ckpt/
-     # --rich
-     # --resume_from_ckpt train_gustaf_output/baseline/openfold-ls6/v8be17mz/checkpoints/4-4999.ckpt/
+     # --resume_from_ckpt train_baseline/test/single_sequence_yiming/1dtp2gjn/checkpoints/74-262499.ckpt/
 
 #      --alignment_index_path=/scratch/00946/zzhang/data/openfold/ls6-tacc/alignment_db/duplicated_super.index \
 #     --wandb \

@@ -7,7 +7,7 @@ import json
 from functools import partial
 from time import perf_counter
 import os
-import pickle
+from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -20,10 +20,19 @@ import ml_collections as mlc
 from tqdm.auto import tqdm
 
 from openfold.data.data_modules import OpenFoldDataModule, DummyDataLoader
+from openfold.np import residue_constants, protein
 from openfold.utils.config_check import enforce_config_constraints
 from openfold.utils.import_weights import import_jax_weights_
 from openfold.utils.tensor_utils import tensor_tree_map
+from openfold.utils.validation_metrics import (
+    drmsd,
+    gdt_ts,
+    gdt_ha,
+)
+from openfold.utils.loss import lddt_ca
+from openfold.utils.superimposition import superimpose
 from openfold import config as openfold_config
+from openfold.data.data_pipeline import _aatype_to_str_sequence
 
 from train_openfold import OpenFoldWrapper, enforce_arg_constrains
 
@@ -114,7 +123,7 @@ def load_args_baseline_casp15():
     args["val_alignment_dir"] = "/scratch/09101/whatever/data/casp15/alignment"
     enforce_arg_constrains(args)
     return args
-    
+
 
 def load_args_baseline_simple():
     args = load_args_msa()
@@ -130,8 +139,7 @@ def load_args_baseline_simple():
 
 
 def load_args_esmfold_example():
-    """deprecated
-    """
+    """deprecated"""
     args = load_args_baseline()
     args["train_data_dir"] = "/work/09101/whatever/data/example/esmfold/001"
     args["alignment_index_path"] = "/work/09101/whatever/data/example/esmfold.index"
@@ -145,17 +153,21 @@ def load_args_esmfold_example():
 
 def fix_validation_arg(args, baseline: bool) -> None:
     """On 1/12/2023, a critical mistake was found in the setting of validation paths.
-    The example script of training OpenFold uses a validation set that seems to be 
-    constructed by randomly selecting 100 from the training set. So validation metrics 
+    The example script of training OpenFold uses a validation set that seems to be
+    constructed by randomly selecting 100 from the training set. So validation metrics
     are incorrect and essentially training metrics.
     The correct validation set (180 CAMEO proteins) is in another directory.
     """
 
     args["val_data_dir"] = "/scratch/00946/zzhang/data/openfold/cameo/mmcif_files"
     if baseline is True:
-        args["val_alignment_dir"]= "/scratch/09101/whatever/data/openfold/cameo_alignments"
+        args[
+            "val_alignment_dir"
+        ] = "/scratch/09101/whatever/data/openfold/cameo_alignments"
     else:
-        args["val_alignment_dir"]= "/scratch/00946/zzhang/data/openfold/cameo/alignments"
+        args[
+            "val_alignment_dir"
+        ] = "/scratch/00946/zzhang/data/openfold/cameo/alignments"
 
 
 def load_config(args):
@@ -278,6 +290,9 @@ def test_openfold_simple():
 
 
 def test_esmfold_example():
+    """
+    Deprecated
+    """
     args = load_args_esmfold_example()
     fix_validation_arg(args, baseline=True)
     config = load_config(args)
@@ -289,9 +304,6 @@ def test_esmfold_example():
     datamodule_baseline.setup()
     dataloader = datamodule_baseline.train_dataloader()
     sample_baseline = next(iter(dataloader))
-    import pdb
-
-    pdb.set_trace()
 
 
 def get_model_basename(model_path):
@@ -438,6 +450,56 @@ def load_of_baseline_checkpoint(epoch: int) -> pl.LightningModule:
         path = "tn1tdqyg/checkpoints/52-185499.ckpt"
     elif epoch == 53:
         path = "37ufgar3/checkpoints/53-188999.ckpt"
+    elif epoch == 54:
+        path = "157akdfw/checkpoints/54-192499.ckpt"
+    elif epoch == 55:
+        path = "157akdfw/checkpoints/55-195999.ckpt"
+    elif epoch == 56:
+        path = "157akdfw/checkpoints/56-199499.ckpt"
+    elif epoch == 57:
+        path = "1lfygjsn/checkpoints/57-202999.ckpt"
+    elif epoch == 58:
+        path = "1lfygjsn/checkpoints/58-206499.ckpt"
+    elif epoch == 59:
+        path = "1lfygjsn/checkpoints/59-209999.ckpt"
+    elif epoch == 60:
+        path = "3ihkdydl/checkpoints/60-213499.ckpt"
+    elif epoch == 61:
+        path = "3ihkdydl/checkpoints/61-216999.ckpt"
+    elif epoch == 62:
+        path = "3ihkdydl/checkpoints/62-220499.ckpt"
+    elif epoch == 63:
+        path = "34mol9ve/checkpoints/63-223999.ckpt"
+    elif epoch == 64:
+        path = "34mol9ve/checkpoints/64-227499.ckpt"
+    elif epoch == 65:
+        path = "34mol9ve/checkpoints/65-230999.ckpt"
+    elif epoch == 66:
+        path = "22zjssxu/checkpoints/66-234499.ckpt"
+    elif epoch == 67:
+        path = "22zjssxu/checkpoints/67-237999.ckpt"
+    elif epoch == 68:
+        path = "22zjssxu/checkpoints/68-241499.ckpt"
+    elif epoch == 69:
+        path = "12iedc2q/checkpoints/69-244999.ckpt"
+    elif epoch == 70:
+        path = "12iedc2q/checkpoints/70-248499.ckpt"
+    elif epoch == 71:
+        path = "12iedc2q/checkpoints/71-251999.ckpt"
+    elif epoch == 72:
+        path = "1dtp2gjn/checkpoints/72-255499.ckpt"
+    elif epoch == 73:
+        path = "1dtp2gjn/checkpoints/73-258999.ckpt"
+    elif epoch == 74:
+        path = "1dtp2gjn/checkpoints/74-262499.ckpt"
+    elif epoch == 75:
+        path = "3i0w5lqt/checkpoints/75-265999.ckpt"
+    elif epoch == 76:
+        path = "3i0w5lqt/checkpoints/76-269499.ckpt"
+    elif epoch == 77:
+        path = "3i0w5lqt/checkpoints/77-272999.ckpt"
+    elif epoch == 78:
+        path = "2np7ybxa/checkpoints/78-276499.ckpt"
     else:
         raise NotImplementedError
 
@@ -492,7 +554,6 @@ def load_val_dataloader(msa: bool = True) -> DataLoader:
 
 def load_val_casp15_dataloader() -> DataLoader:
     args = load_args_baseline_casp15()
-    fix_validation_arg(args, baseline=True)
     config = load_config(args)
     config["model"]["extra_msa"]["enabled"] = False
     config["model"]["template"]["enabled"] = False
@@ -504,8 +565,16 @@ def load_val_casp15_dataloader() -> DataLoader:
 
 
 def cal_validation_res(
-    model_module: pl.LightningModule, dataloader_val: DataLoader
-) -> pd.DataFrame:
+    model_module: pl.LightningModule,
+    dataloader_val: DataLoader,
+) -> Tuple[pd.DataFrame, List[protein.Protein]]:
+    """
+    Predict coordinates and store result as Protein objects. Other predictions and time
+    required are stored in a pandas dataframe. Metrics are not calculated here.
+
+    CAMEO (180 chains, mmcif ground truth)
+    CASP15 regular ()
+    """
     # At the start of validation, load the EMA weights
     # Don't run this on AlphaFold2 weight.
     # if model_module.cached_weights is None:
@@ -519,21 +588,48 @@ def cal_validation_res(
     #     model_module.model.load_state_dict(
     #         model_module.ema.state_dict()["params"]
     #     )
-
+    names = []
     sequences = []
-    # num_msas = []
-    all_atom_positions = []
-    final_atom_positions = []
     plddts = []
-    tms = []
+    ptms = []
     paes = []
     losses = []
-    metrics = []
+    proteins = []
+    times = []
+
+    # if casp_data_dir is not None:
+    #     with open(f"{casp_data_dir}/casp15_regular.json") as f:
+    #         casp15 = json.load(f)
+    #     seq2name = {casp15[n]["fasta"].split("\n")[1]: n for n in casp15}
+    #     names = []
+    #     names_regular = []
+    #     types_regular = []
+    #     metrics_casp15_regular = []
+    #     residue_index_regular = []
+    #     sequences_regular = []
+    #     all_atom_positions_regular = []
+    #     final_atom_positions_regular = []
+    #     all_atom_masks_regular = []
+    #     plddts_regular = []
+    #     tms_regular = []
+    #     paes_regular = []
+    #     # losses_regular = []
+    #     metrics_regular = []
     with torch.no_grad():
         for sample in tqdm(dataloader_val):
             batch = {k: v.cuda() for k, v in sample.items()}
+
+            sequence = batch["aatype"][0, :, 0].cpu().numpy()
+            if len(sequence) > 2000:
+                continue
+            sequences.append(sequence.tolist())
+            name = batch["name"][0, :, 0].cpu().numpy().tobytes().decode("ascii")
+            names.append(name)
+
             # Run the model
+            start = perf_counter()
             outputs = model_module.model(batch)
+            times.append(perf_counter() - start)
             batch = tensor_tree_map(lambda t: t[..., -1], batch)
 
             # Compute loss and other metrics
@@ -541,52 +637,162 @@ def cal_validation_res(
             _, loss_breakdown = model_module.loss(
                 outputs, batch, _return_breakdown=True, violation_breakdown=True
             )
-            other_metrics = model_module._compute_validation_metrics(
-                batch, outputs, superimposition_metrics=True
-            )
+            # if casp_data_dir is None:
+            #     other_metrics = model_module._compute_validation_metrics(
+            #         batch, outputs, superimposition_metrics=True
+            #     )
+            # else:
+            #     other_metrics = {}
 
-            sequences.append(batch["aatype"][0].cpu().numpy())
-            all_atom_positions.append(batch["all_atom_positions"][0].cpu().numpy())
-            final_atom_positions.append(
-                outputs["final_atom_positions"][0].cpu().numpy()
-            )
-            plddts.append(outputs["plddt"][0].cpu().numpy())
-            tms.append(
-                outputs["predicted_tm_score"].item()
+            plddt = outputs["plddt"][0].cpu().numpy()
+            plddts.append(plddt.tolist())
+            ptms.append(
+                outputs["predicted_tm_score"].tolist()
                 if "predicted_tm_score" in outputs
                 else None
             )
             paes.append(
-                outputs["predicted_aligned_error"][0].cpu().numpy()
+                outputs["predicted_aligned_error"][0].cpu().numpy().tolist()
                 if "predicted_aligned_error" in outputs
                 else None
             )
-            metrics.append({k: v.item() for k, v in other_metrics.items()})
             losses.append({k: v.item() for k, v in loss_breakdown.items()})
+
+            residue_index = batch["residue_index"][0].cpu().numpy()
+            atom_positions = outputs["final_atom_positions"][0].cpu().numpy()
+            atom_mask = outputs["final_atom_mask"][0].cpu().numpy()
+            b_factors = plddt[:, None] * atom_mask
+            proteins.append(
+                protein.Protein(
+                    atom_positions, sequence, atom_mask, residue_index, b_factors
+                )
+            )
+
+            # if casp_data_dir is not None:
+            #     seq_letter = _aatype_to_str_sequence(sequence)
+            #     name = seq2name[seq_letter]
+            #     length = casp15[name]["length"]
+            #     names.append(name)
+            #     assert length == sequence.shape[0]
+            #     assert casp15[name]["available"] == True
+            #     for domain in casp15[name]["domains"]:
+            #         name_domain, type_domain, _, metric_domain, chunks = domain
+            #         if chunks == [None]:
+            #             # full protein
+            #             file_ = f"{casp_data_dir}/whole/{name}.pdb"
+            #             chunks = [[1, length]]
+            #             idxs = list(range(1, length + 1))
+            #             continue  # what is said to be whole is not whole actually
+            #         else:
+            #             file_ = f"{casp_data_dir}/domains/{name_domain}.pdb"
+            #             idxs = [k for i, j in chunks for k in list(range(i, j + 1))]
+
+            #         with open(file_) as f:
+            #             protein_object = protein.from_pdb_string(f.read())
+
+            #         # assert protein_object.residue_index == idxs
+            #         if not protein_object.residue_index.tolist() == idxs:
+            #             print(
+            #                 name_domain,
+            #                 set(idxs) - set(protein_object.residue_index.tolist()),
+            #             )
+
+            #         def get_domain(arr: np.array, dim: int = 1):
+            #             """First dimension must correspond to residues."""
+            #             arr = arr[protein_object.residue_index - 1]
+            #             if dim == 1:
+            #                 return arr
+            #             else:
+            #                 return arr[:, protein_object.residue_index - 1]
+            #                 # return np.concatenate(
+            #                 #     [
+            #                 #         arr[:, chunk_start - 1 : chunk_end]
+            #                 #         for chunk_start, chunk_end in chunks
+            #                 #     ],
+            #                 #     axis=1,
+            #                 # )
+
+            #         names_regular.append(name_domain)
+            #         types_regular.append(type_domain)
+            #         metrics_casp15_regular.append(metric_domain)
+            #         residue_index_regular.append(
+            #             np.array(protein_object.residue_index, dtype=int)
+            #         )
+            #         sequences_regular.append(get_domain(sequence))
+
+            #         all_atom_positions_regular.append(
+            #             np.array(protein_object.atom_positions, dtype=np.float32)
+            #         )
+            #         final_atom_positions_regular.append(
+            #             get_domain(final_atom_positions[-1])
+            #         )
+            #         all_atom_masks_regular.append(
+            #             np.array(protein_object.atom_mask, dtype=int)
+            #         )
+            #         plddts_regular.append(get_domain(plddts[-1]))
+            #         tms_regular.append(None if tms[-1] is None else get_domain(tms[-1]))
+            #         paes_regular.append(
+            #             None if paes[-1] is None else get_domain(paes[-1], 2)
+            #         )
+            #         # other_metrics_regular = model_module._compute_validation_metrics(
+            #         #     batch=dict(
+            #         #         all_atom_positions=torch.from_numpy(
+            #         #             all_atom_positions_regular[-1]
+            #         #         )
+            #         #         .unsqueeze(0)
+            #         #         .cuda(),
+            #         #         all_atom_mask=torch.from_numpy(all_atom_masks_regular[-1])
+            #         #         .unsqueeze(0)
+            #         #         .cuda(),
+            #         #     ),
+            #         #     outputs=dict(
+            #         #         final_atom_positions=torch.from_numpy(
+            #         #             final_atom_positions_regular[-1]
+            #         #         )
+            #         #         .unsqueeze(0)
+            #         #         .cuda()
+            #         #     ),
+            #         #     superimposition_metrics=True,
+            #         # )
+            #         # metrics_regular.append(
+            #         #     {k: v.item() for k, v in other_metrics_regular.items()}
+            #         # )
 
     df = pd.DataFrame(
         {
+            "name": names,
             "sequence": sequences,
-            "all_atom_positions": all_atom_positions,
-            "final_atom_positions": final_atom_positions,
             "plddt": plddts,
-            "tm": tms,
+            "ptm": ptms,
             "pae": paes,
             "loss": losses,
-            "other_metrics": metrics,
+            "time": times,
         }
     )
-    return df
+    return df, proteins
 
-    # with open("val_res/af2_model_2_ptm.pkl", "wb") as f:
-    #     pickle.dump(
+    # if casp_data_dir is not None:
+    #     df["name"] = names
+    #     # for casp15, df does not mean anything now, since we do not have full protein structure data.
+    #     df_regular = pd.DataFrame(
     #         {
-    #             "final_atom_position": final_atom_positions,
-    #             "metric": metrics,
-    #             "loss": losses,
-    #         },
-    #         f,
+    #             "name": names_regular,
+    #             "type": types_regular,
+    #             "metric_casp15": metrics_casp15_regular,
+    #             "residue_index": residue_index_regular,
+    #             "sequence": sequences_regular,
+    #             "all_atom_positions": all_atom_positions_regular,
+    #             "final_atom_positions": final_atom_positions_regular,
+    #             "all_atom_masks": all_atom_masks_regular,
+    #             "plddt": plddts_regular,
+    #             "ptm": tms_regular,
+    #             "pae": paes_regular,
+    #             "other_metrics": metrics_regular,
+    #         }
     #     )
+    #     return df, df_regular
+    # else:
+    #     return df
 
 
 if __name__ == "__main__":
@@ -608,17 +814,27 @@ if __name__ == "__main__":
     # df.to_pickle("val_res/af2_model_2_ptm.pkl")
 
     # ==== run CAMEO validation with openfold baseline ====
-    for i in range(53, 52, -1):
+    for i in range(78, -1, -1):
         seed_everything(42)
-        df = cal_validation_res(
+        df, proteins = cal_validation_res(
             load_of_baseline_checkpoint(i), load_val_dataloader(msa=False)
         )
-        df.to_pickle(f"val_res/of_baseline_{i}.pkl")
+        df.to_pickle(f"val_res/cameo/of_baseline_{i}.pkl")
+        os.makedirs(f"val_res/cameo_pdb/of_baseline_{i}", exist_ok=True)
+        for n, prot in zip(df.name, proteins):
+            with open(f"val_res/cameo_pdb/of_baseline_{i}/{n}.pdb", "w") as f:
+                print(protein.to_pdb(prot), file=f, end="")
 
-    # ==== run CASP15 4 cases with openfold baseline ====
-    i = 53
-    seed_everything(42)
-    df = cal_validation_res(
-        load_of_baseline_checkpoint(i), load_val_casp15_dataloader()
-    )
-    df.to_pickle(f"val_casp15_res/of_baseline_{i}.pkl")
+    # ==== run CASP15 with openfold baseline ====
+    # i = 78
+    # seed_everything(42)
+    # df, proteins = cal_validation_res(
+    #     load_of_baseline_checkpoint(i),
+    #     load_val_casp15_dataloader(),
+    #     # "/scratch/09101/whatever/data/casp15",
+    # )
+    # df.to_pickle(f"val_res/casp15/of_baseline_{i}.pkl")
+    # os.makedirs(f"val_res/casp15_pdb/of_baseline_{i}", exist_ok=True)
+    # for n, prot in zip(df.name, proteins):
+    #     with open(f"val_res/casp15_pdb/of_baseline_{i}/{n}.pdb", "w") as f:
+            # print(protein.to_pdb(prot), file=f, end="")

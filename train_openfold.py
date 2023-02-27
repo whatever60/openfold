@@ -594,6 +594,18 @@ if __name__ == "__main__":
         default=None,
         help="Distillation alignment index. See the README for instructions.",
     )
+    parser.add_argument(
+        "--distillation_data_dir_esmfold_atlas",
+        type=str,
+        default=None,
+        help="Distillation data of ESMFold Atlas",  # no alignment, no template
+    )
+    parser.add_argument(
+        "--simple",
+        type=bool,
+        default=False,
+        help="Whether to use simple datamodule",  # no alignment, no template
+    )
     # parser.add_argument(
     #     "--rich",
     #     action="store_true",

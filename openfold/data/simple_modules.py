@@ -840,7 +840,6 @@ class OpenFoldSimpleSingleDataset(torch.utils.data.Dataset):
         super().__init__()
         self.data_dir = data_dir
         self.mode = mode
-        self.mode = mode
         self._output_raw = _output_raw
 
         self._chain_ids = [d for d in os.listdir(data_dir) if os.path.isdir(d)]
@@ -959,53 +958,27 @@ class AtlasSimpleSingleDataset(torch.utils.data.Dataset):
         # filter_path: Optional[str] = None,
         mode: str = "train",
         _output_raw: bool = False,
-        _structure_index: Optional[Any] = None,
     ):
         super().__init__()
         self.data_dir = data_dir
         self.mode = mode
-        self.mode = mode
         self._output_raw = _output_raw
 
-        self._chain_ids = [d for d in os.listdir(data_dir) if os.path.isdir(d)]
+        self.collections = [d for d in os.listdir(data_dir) if os.path.isdir(d)]
+        self._chain_ids = [f"{c}/{i}" for c in self.collections for i in os.listdir(c)]
 
-        if chain_data_cache_path is not None:
-            with open(chain_data_cache_path, "r") as f:
-                self.chain_data_cache = json.load(f)
-            assert isinstance(self.chain_data_cache, dict)
-        else:
-            self.chain_data_cache = None
-        self._structure_index = _structure_index
-
-        # chain_data_cache is not used to filter data. There is no point of doing this for distillation dataset.
-
-        # if self.chain_data_cache is not None:
-        #     # Filter to include only chains where we have structure data
-        #     # (entries in chain_data_cache)
-        #     # import pdb; pdb.set_trace()
-        #     original_chain_ids = self._chain_ids
-        #     self._chain_ids = [c for c in self._chain_ids if c in self.chain_data_cache]
-        #     if len(self._chain_ids) < len(original_chain_ids):
-        #         missing = [
-        #             c for c in original_chain_ids if c not in self.chain_data_cache
-        #         ]
-        #         max_to_print = 10
-        #         missing_examples = ", ".join(missing[:max_to_print])
-        #         if len(missing) > max_to_print:
-        #             missing_examples += ", ..."
-        #         logging.warning(
-        #             "Removing %d alignment entries (%s) with no corresponding "
-        #             "entries in chain_data_cache (%s).",
-        #             len(missing),
-        #             missing_examples,
-        #             chain_data_cache_path,
-        #         )
+        # if chain_data_cache_path is not None:
+        #     with open(chain_data_cache_path, "r") as f:
+        #         self.chain_data_cache = json.load(f)
+        #     assert isinstance(self.chain_data_cache, dict)
+        # else:
+        #     self.chain_data_cache = None
 
         self._chain_id_to_idx_dict = {
             chain: i for i, chain in enumerate(self._chain_ids)
         }
 
-        self.data_pipeline = DataPipeline(template_featurizer=None)
+        # self.data_pipeline = DataPipeline(template_featurizer=None)
         if not self._output_raw:
             self.feature_pipeline = feature_pipeline.FeaturePipeline(config)
 
@@ -1021,28 +994,30 @@ class AtlasSimpleSingleDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         name = self.idx_to_chain_id(idx)
         if self.mode == "train" or self.mode == "eval":
-            spl = name.rsplit("_", 1)
-            if len(spl) == 2:
-                file_id, chain_id = spl
-            else:
-                (file_id,) = spl
-                chain_id = None
+            # spl = name.rsplit("_", 1)
+            # if len(spl) == 2:
+            #     file_id, chain_id = spl
+            # else:
+            #     (file_id,) = spl
+            #     chain_id = None
 
-            # ==== note this line ====
-            path = os.path.join(self.data_dir, file_id, file_id)
-            # ========================
+            # # ==== note this line ====
+            # path = os.path.join(self.data_dir, file_id, file_id)
+            # # ========================
 
-            path += self.ext
-            structure_index = None
-            if self._structure_index is not None:
-                structure_index = self._structure_index[name]
-            data = self.data_pipeline.process_pdb(
-                pdb_path=path,
-                is_distillation=True,
-                chain_id=chain_id,
-                _structure_index=structure_index,
-            )
+            # path += self.ext
+            # structure_index = None
+            # if self._structure_index is not None:
+            #     structure_index = self._structure_index[name]
+            # data = self.data_pipeline.process_pdb(
+            #     pdb_path=path,
+            #     is_distillation=True,
+            #     chain_id=chain_id,
+            #     _structure_index=structure_index,
+            # )
+            data = self.make_decoy_compact_openfold(f"{self.data_dir}/{name}")
         else:
+            raise NotImplementedError
             path = os.path.join(name, name + ".fasta")
             data = self.data_pipeline.process_fasta(
                 fasta_path=path,
@@ -1119,6 +1094,7 @@ class AtlasSimpleSingleDataset(torch.utils.data.Dataset):
                 common_cfg=dummy_config["common"], mode_cfg=dummy_config["train"]
             )
             tensor_dict = compose(nonensembled)(tensor_dict)
+            
         # now let's apply some assertions to make sure that decoy structure is indeed as simple as we thought.
         assert tensor_dict["seq_length"] == num_res, "sequence length not matched"
         assert (
