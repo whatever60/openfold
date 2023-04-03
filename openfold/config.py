@@ -168,6 +168,14 @@ def model_config(
         # c.data.common.no_templ = True
         # c.data.common.msa_cluster_features = False
         c.loss.masked_msa.weight = 0.0
+    elif name == "finetuning_no_msa_no_template":
+        c.model.extra_msa.enabled = False
+        c.model.template.enabled = False
+        c.data.train.crop_size = 384
+        c.data.train.max_extra_msa = 5120
+        c.data.train.max_msa_clusters = 512
+        c.loss.violation.weight = 1.
+        c.loss.experimentally_resolved.weight = 0.01
     elif name == "no_msa":
         c.model.extra_msa.enabled = False
         c.loss.masked_msa.weight = 0.0
