@@ -823,7 +823,8 @@ def _process_single_hit(
     # The mapping is from the query to the actual hit sequence, so we need to
     # remove gaps (which regardless have a missing confidence score).
     template_sequence = hit.hit_sequence.replace("-", "")
-
+    if hit_pdb_code == "5vpk":
+        print(query_sequence, hit.name)
     cif_path = os.path.join(mmcif_dir, hit_pdb_code + ".cif")
     logging.info(
         "Reading PDB entry from %s. Query: %s, template: %s",

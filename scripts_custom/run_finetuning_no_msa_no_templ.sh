@@ -22,7 +22,7 @@ python train_openfold.py \
      --val_data_dir /scratch/00946/zzhang/data/openfold/cameo/mmcif_files \
      --val_alignment_dir /scratch/09101/whatever/data/openfold/cameo_alignments \
      --template_release_dates_cache_path /scratch/00946/zzhang/data/openfold/ls6-tacc/gustaf/mmcif_cache.json \
-     --train_epoch_len 63000 \
+     --train_epoch_len 31500 \
      --accumulate_grad_batches 3 \
      --replace_sampler_ddp True \
      --log_lr \
@@ -38,7 +38,7 @@ python train_openfold.py \
      --config_preset finetuning_no_msa_no_template \
      --gpus $1 \
      --num_nodes $2 \
-     --resume_from_ckpt train_baseline/test/single_sequence_yiming/3or5efyd/checkpoints/86-304499.ckpt/
+     --resume_from_ckpt train_baseline/test/single_sequence_yiming/aqza27wq/checkpoints/90-309749.ckpt/
      # --rich
      # --resume_from_ckpt train_gustaf_output/baseline/openfold-ls6/v8be17mz/checkpoints/4-4999.ckpt/
 
